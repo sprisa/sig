@@ -14,7 +14,7 @@ func (c *Client) Query(ctx context.Context, q NativeQuery) (QueryResult, error) 
 	if q.kind == "" {
 		return QueryResult{}, usage("native query must be parsed before execution")
 	}
-	data, err := c.request(ctx, http.MethodPost, "/api/v5/query_range", q.payload, nil)
+	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v5/query_range", q.payload, nil)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -25,7 +25,7 @@ func (c *Client) Preview(ctx context.Context, q NativeQuery, verbose bool) (Prev
 	if q.kind == "" {
 		return PreviewResult{}, usage("native query must be parsed before preview")
 	}
-	data, err := c.request(ctx, http.MethodPost, "/api/v5/query_range/preview", q.payload, url.Values{"verbose": {strconv.FormatBool(verbose)}})
+	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v5/query_range/preview", q.payload, url.Values{"verbose": {strconv.FormatBool(verbose)}})
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -36,7 +36,7 @@ func (c *Client) MetricsQuery(ctx context.Context, r MetricsQueryRequest) (Query
 	if err := r.Validate(); err != nil {
 		return QueryResult{}, err
 	}
-	data, err := c.request(ctx, http.MethodPost, "/api/v5/query_range", queryRequest{
+	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v5/query_range", queryRequest{
 		SchemaVersion: "v1", Start: r.Start.UnixMilli(), End: r.End.UnixMilli(), RequestType: "time_series", NoCache: r.NoCache,
 		CompositeQuery: compositeQuery{Queries: []queryEnvelope{{Type: "promql", Spec: promSpec{Name: "A", Query: r.Expression, Step: int64(r.Step / time.Second)}}}},
 	}, nil)
@@ -58,19 +58,18 @@ func (c *Client) Trace(ctx context.Context, r TraceRequest) (TraceResult, error)
 		Selected string   `json:"selectedSpanId"`
 		Expanded []string `json:"uncollapsedSpans"`
 	}{strings.ToLower(r.SelectedSpan), expanded}
-	data, err := c.request(ctx, http.MethodPost, "/api/v4/traces/"+strings.ToLower(r.ID)+"/waterfall", body, nil)
+	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v4/traces/"+strings.ToLower(r.ID)+"/waterfall", body, nil)
 	if err != nil {
 		return TraceResult{}, err
 	}
 	var wire struct {
-		Spans                    json.RawMessage
+		Spans                    nullableRows
 		HasMore, HasMissingSpans *bool
 	}
-	var spans []json.RawMessage
-	if json.Unmarshal(data, &wire) != nil || wire.HasMore == nil || wire.HasMissingSpans == nil || json.Unmarshal(wire.Spans, &spans) != nil {
+	if json.Unmarshal(data, &wire) != nil || wire.HasMore == nil || wire.HasMissingSpans == nil || !wire.Spans.Present {
 		return TraceResult{}, invalidResponse("unexpected trace waterfall response")
 	}
-	return TraceResult{Raw: data, Spans: spans, HasMore: *wire.HasMore, HasMissingSpans: *wire.HasMissingSpans}, nil
+	return TraceResult{Raw: data, Spans: wire.Spans.Values, HasMore: *wire.HasMore, HasMissingSpans: *wire.HasMissingSpans}, nil
 }
 
 func (c *Client) MetricsList(ctx context.Context, r MetricsListRequest) (MetricsListResult, error) {
@@ -81,15 +80,14 @@ func (c *Client) MetricsList(ctx context.Context, r MetricsListRequest) (Metrics
 	if r.Search != "" {
 		params.Set("searchText", r.Search)
 	}
-	data, err := c.request(ctx, http.MethodGet, "/api/v2/metrics", nil, params)
+	wire, err := request[struct{ Metrics nullableRows }](ctx, c, http.MethodGet, "/api/v2/metrics", nil, params)
 	if err != nil {
 		return MetricsListResult{}, err
 	}
-	var wire struct{ Metrics json.RawMessage }
-	var metrics []json.RawMessage
-	if json.Unmarshal(data, &wire) != nil || json.Unmarshal(wire.Metrics, &metrics) != nil {
+	if !wire.Metrics.Present {
 		return MetricsListResult{}, invalidResponse("metric listing did not contain an array")
 	}
+	metrics := wire.Metrics.Values
 	if metrics == nil {
 		metrics = []json.RawMessage{}
 	}

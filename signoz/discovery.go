@@ -22,7 +22,7 @@ func (c *Client) FieldKeys(ctx context.Context, r FieldKeysRequest) (FieldKeysRe
 	if err := r.Validate(); err != nil {
 		return FieldKeysResult{}, err
 	}
-	data, err := c.request(ctx, http.MethodGet, "/api/v1/fields/keys", nil, discoveryParams(r))
+	data, err := request[json.RawMessage](ctx, c, http.MethodGet, "/api/v1/fields/keys", nil, discoveryParams(r))
 	if err != nil {
 		return FieldKeysResult{}, err
 	}
@@ -46,7 +46,7 @@ func (c *Client) FieldValues(ctx context.Context, r FieldValuesRequest) (FieldVa
 	if r.Where != "" {
 		p.Set("existingQuery", r.Where)
 	}
-	data, err := c.request(ctx, http.MethodGet, "/api/v1/fields/values", nil, p)
+	data, err := request[json.RawMessage](ctx, c, http.MethodGet, "/api/v1/fields/values", nil, p)
 	if err != nil {
 		return FieldValuesResult{}, err
 	}

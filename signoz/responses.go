@@ -48,17 +48,33 @@ type FieldValuesResult struct {
 
 func invalidResponse(message string) error { return &Error{Code: "invalid_response", Message: message} }
 
+// Track a required array's presence without copying the entire array into a
+// RawMessage. Explicit null remains distinct from an absent field; endpoints
+// decide whether to normalize null to an empty slice. Each row owns its bytes.
+type nullableRows struct {
+	Values  []json.RawMessage
+	Present bool
+}
+
+func (r *nullableRows) UnmarshalJSON(data []byte) error {
+	var rows []json.RawMessage
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return err
+	}
+	r.Values, r.Present = rows, true
+	return nil
+}
+
 func decodeQueryResult(data json.RawMessage, kind string) (QueryResult, error) {
 	var wire struct {
 		Type    string
-		Data    struct{ Results json.RawMessage }
+		Data    struct{ Results []json.RawMessage }
 		Warning json.RawMessage
 	}
-	var results []json.RawMessage
-	if json.Unmarshal(data, &wire) != nil || wire.Type != kind || json.Unmarshal(wire.Data.Results, &results) != nil || results == nil {
+	if json.Unmarshal(data, &wire) != nil || wire.Type != kind || wire.Data.Results == nil {
 		return QueryResult{}, invalidResponse("unexpected query result type or missing result array")
 	}
-	return QueryResult{Type: wire.Type, Results: results, Warning: wire.Warning, Raw: data}, nil
+	return QueryResult{Type: wire.Type, Results: wire.Data.Results, Warning: wire.Warning, Raw: data}, nil
 }
 
 func decodePreview(data json.RawMessage) (PreviewResult, error) {

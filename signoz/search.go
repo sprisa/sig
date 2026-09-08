@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 )
 
 type searchSpec struct {
@@ -49,38 +50,42 @@ func (c *Client) Search(ctx context.Context, r SearchRequest) (SearchPage, error
 	if r.Where != "" {
 		spec.Filter = &searchFilter{Expression: r.Where}
 	}
-	data, err := c.request(ctx, http.MethodPost, "/api/v5/query_range", queryRequest{
+	type searchResponse struct {
+		Type string
+		Data struct {
+			Results []struct {
+				QueryName  string
+				Rows       nullableRows
+				NextCursor string
+			}
+		}
+		Warning json.RawMessage
+	}
+	response, err := request[searchResponse](ctx, c, http.MethodPost, "/api/v5/query_range", queryRequest{
 		SchemaVersion: "v1", Start: r.Start.UnixMilli(), End: r.End.UnixMilli(), RequestType: "raw",
 		CompositeQuery: compositeQuery{Queries: []queryEnvelope{{Type: "builder_query", Spec: spec}}},
 	}, nil)
 	if err != nil {
 		return SearchPage{}, err
 	}
-	result, err := decodeQueryResult(data, "raw")
-	if err != nil {
-		return SearchPage{}, err
-	}
-	if len(result.Results) != 1 {
+	if response.Type != "raw" || len(response.Data.Results) != 1 {
 		return SearchPage{}, invalidResponse("search must return exactly one query result")
 	}
-	var wire struct {
-		QueryName  string
-		Rows       json.RawMessage
-		NextCursor string
-	}
-	var rows []json.RawMessage
-	if json.Unmarshal(result.Results[0], &wire) != nil || wire.QueryName != "A" || json.Unmarshal(wire.Rows, &rows) != nil {
+	wire := response.Data.Results[0]
+	if wire.QueryName != "A" || !wire.Rows.Present {
 		return SearchPage{}, invalidResponse("unexpected search row array or query name")
 	}
+	rows := wire.Rows.Values
 	if rows == nil {
 		rows = []json.RawMessage{}
 	}
-	page := SearchPage{Rows: rows, NextCursor: wire.NextCursor, Warning: result.Warning}
+	page := SearchPage{Rows: rows, NextCursor: wire.NextCursor, Warning: response.Warning}
 	if string(page.Warning) == "null" {
 		page.Warning = nil
 	}
 	if len(rows) > r.Limit {
-		page.Rows = rows[:r.Limit]
+		// Do not retain the discarded rows through the backing slice's pointers.
+		page.Rows = slices.Clone(rows[:r.Limit])
 		page.NextCursor = ""
 		page.Truncated = true
 	}

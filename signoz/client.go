@@ -63,7 +63,25 @@ func New(rawURL, key string, timeout time.Duration) (*Client, error) {
 	}}, nil
 }
 
-func (c *Client) request(ctx context.Context, method, path string, body any, params url.Values) (json.RawMessage, error) {
+// request decodes the HTTP envelope directly into the endpoint's wire model.
+// RawMessage is reserved for payloads that must retain their original JSON.
+func request[T any](ctx context.Context, c *Client, method, path string, body any, params url.Values) (T, error) {
+	var zero T
+	b, err := c.responseBody(ctx, method, path, body, params)
+	if err != nil {
+		return zero, err
+	}
+	var envelope struct {
+		Status string `json:"status"`
+		Data   *T     `json:"data"`
+	}
+	if json.Unmarshal(b, &envelope) != nil || envelope.Status != "success" || envelope.Data == nil {
+		return zero, invalidResponse("API returned an unsuccessful or unexpected JSON response")
+	}
+	return *envelope.Data, nil
+}
+
+func (c *Client) responseBody(ctx context.Context, method, path string, body any, params url.Values) ([]byte, error) {
 	var input io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -122,14 +140,7 @@ func (c *Client) request(ctx context.Context, method, path string, body any, par
 	if len(b) > maxResponseBytes {
 		return nil, &Error{Code: "response_too_large", Message: "API response exceeds 16 MiB; reduce the query range or limit"}
 	}
-	var envelope struct {
-		Status string          `json:"status"`
-		Data   json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(b, &envelope); err != nil || envelope.Status != "success" || len(envelope.Data) == 0 || bytes.Equal(envelope.Data, []byte("null")) {
-		return nil, &Error{Code: "invalid_response", Message: "API returned an unsuccessful or unexpected JSON response"}
-	}
-	return envelope.Data, nil
+	return b, nil
 }
 
 func transportError(ctx context.Context, err error) error {
@@ -145,7 +156,7 @@ func transportError(ctx context.Context, err error) error {
 }
 
 func (c *Client) Me(ctx context.Context) (Identity, error) {
-	data, err := c.request(ctx, http.MethodGet, "/api/v1/service_accounts/me", nil, nil)
+	data, err := request[json.RawMessage](ctx, c, http.MethodGet, "/api/v1/service_accounts/me", nil, nil)
 	if err != nil {
 		return Identity{}, err
 	}

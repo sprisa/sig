@@ -4,6 +4,11 @@ version: '3'
 
 vars:
   VERSION: dev
+  BENCH_TIME: 300ms
+  BENCH_COUNT: '3'
+  PERF_CASE: near_cap
+  PROFILE_TIME: 10x
+  RESOURCE_COUNT: '3'
 
 tasks:
   default:
@@ -51,6 +56,54 @@ tasks:
     desc: Repeat race-enabled tests with randomized order
     cmds:
       - go test -race -shuffle=on -count=3 ./...
+
+  perf:
+    desc: Run synthetic allocation and throughput benchmarks (no race detector)
+    cmds:
+      - go test -trimpath -run '^$' -bench . -benchmem -benchtime '{{.BENCH_TIME}}' -count '{{.BENCH_COUNT}}' ./tests
+
+  perf:throughput:
+    desc: Benchmark the real search, pagination, and JSON output pipeline over loopback
+    cmds:
+      - go test -trimpath -run '^$' -bench '^BenchmarkSearchAndOutput$' -benchmem -benchtime '{{.BENCH_TIME}}' -count '{{.BENCH_COUNT}}' ./tests
+
+  perf:decode:
+    desc: Compare nested RawMessage decoding with a direct typed-envelope experiment
+    cmds:
+      - go test -trimpath -run '^$' -bench '^BenchmarkDecodeStrategies$' -benchmem -benchtime '{{.BENCH_TIME}}' -count '{{.BENCH_COUNT}}' ./tests
+
+  perf:encode:
+    desc: Isolate raw-row JSON encoding costs (buffer pools may be reused)
+    cmds:
+      - go test -trimpath -run '^$' -bench '^BenchmarkEncodeRawRows$' -benchmem -benchtime '{{.BENCH_TIME}}' -count '{{.BENCH_COUNT}}' ./tests
+
+  perf:profile:
+    desc: Capture CPU and allocation profiles under ignored bin/perf
+    cmds:
+      - mkdir -p bin/perf
+      - go test -trimpath -run '^$' -bench '^BenchmarkSearchAndOutput$/{{.PERF_CASE}}$' -benchmem -benchtime '{{.PROFILE_TIME}}' -count=1 -cpuprofile '{{.ROOT_DIR}}/bin/perf/cpu.pprof' -memprofile '{{.ROOT_DIR}}/bin/perf/alloc.pprof' -o '{{.ROOT_DIR}}/bin/perf/bench.test' ./tests
+
+  perf:alloc:
+    desc: Show cumulative allocation hotspots from the latest performance profile
+    preconditions:
+      - sh: test -f bin/perf/alloc.pprof
+        msg: Run task perf:profile first
+    cmds:
+      - go tool pprof -top -alloc_space bin/perf/bench.test bin/perf/alloc.pprof
+
+  perf:cpu:
+    desc: Show CPU hotspots from the latest performance profile
+    preconditions:
+      - sh: test -f bin/perf/cpu.pprof
+        msg: Run task perf:profile first
+    cmds:
+      - go tool pprof -top bin/perf/bench.test bin/perf/cpu.pprof
+
+  perf:resources:
+    desc: Measure compiled CLI CPU/RSS and retained heap using synthetic data (macOS/Linux)
+    deps: [build]
+    cmds:
+      - go test -trimpath -run '^(TestProcessResources|TestRetainedHeap)$' -count=1 -v ./tests -args -resource-binary '{{.ROOT_DIR}}/bin/sig' -resource-count '{{.RESOURCE_COUNT}}'
 
   vuln:
     desc: Scan reachable Go vulnerabilities (requires network access)

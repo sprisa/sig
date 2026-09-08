@@ -374,6 +374,11 @@ task install
 task build VERSION=v1.0.0-rc.1
 ```
 
+Allocation, throughput, CPU-profile, and process-memory checks are available via
+`task perf`, `task perf:profile`, and `task perf:resources`. They use only synthetic
+data. See [tests/README.md](tests/README.md) for workloads, task options,
+and the distinction between allocated bytes, retained heap, and peak RSS.
+
 Tests use synthetic fixtures, local HTTP test servers, and an in-memory credential
 store. They require no SigNoz instance, cluster access, or OS keychain. Bash workflow
 tests require Bash and `jq`; Unix terminal regression tests require `expect` and
