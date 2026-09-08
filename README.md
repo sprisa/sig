@@ -3,10 +3,10 @@
 A JSON-first SigNoz CLI for humans, scripts, and AI agents. Built with Go and
 [urfave/cli v3](https://cli.urfave.org/v3/).
 
-The initial implementation supports service-account authentication, optional named
-contexts, and bounded log searches. Traces, metrics, field discovery, and advanced
-query commands are not implemented yet. The API client targets SigNoz v0.132.0's
-service-account and v5 query contracts; other releases are not yet verified.
+The v1 command surface covers service-account authentication, contexts, paginated
+log and span search, trace retrieval, PromQL, telemetry discovery, native JSON
+queries, and machine-readable command discovery. The client targets SigNoz
+v0.132.0's APIs; API compatibility with other releases must be verified separately.
 
 ## Install
 
@@ -131,7 +131,7 @@ sig logs search \
 ```
 
 Filters use native SigNoz expression syntax, not a new CLI query language. A search
-sends one builder query to `POST /api/v5/query_range`, ordered by timestamp and ID
+sends a builder query per page to `POST /api/v5/query_range`, ordered by timestamp and ID
 descending. Defaults are a 15-minute lookback, 100 records, and a 30-second HTTP
 timeout. Override the timeout with `--timeout 60s`.
 
@@ -139,11 +139,157 @@ timeout. Override the timeout with `--timeout 60s`.
 `--since` are mutually exclusive. `--end` defaults to now; timestamps require a
 timezone and are normalized to millisecond precision. Limits must be 1-10000.
 
-Search retrieves one page only. It does not follow cursors or retry requests.
-Upstream cursors are preserved as metadata for inspection; cursor input and
-automatic pagination are not yet supported. A full page without a cursor is
-marked `unknown`, not assumed complete. Warnings are preserved. Responses larger
-than 16 MiB are rejected; narrow the query or reduce the limit.
+### Pagination
+
+Both log and span searches support bounded multiple-page retrieval:
+
+```sh
+sig logs search --since 1h --limit 100 --pages 3
+sig traces search --since 1h --limit 50 --pages 2
+
+# Resume with the next_page_token from the preceding JSON response.
+sig logs search --page-token "$PAGE_TOKEN"
+```
+
+`--limit` is the per-page size. `--pages` defaults to 1 and is capped at 100;
+`limit * pages` cannot exceed 10000 rows. The timeout applies to the entire search,
+not independently to every page. Combined rows and warning content are capped at
+16 MiB. A failed later page produces an error, not silently successful partial
+output. Warnings stop automatic paging and are preserved.
+
+A continuation token retains the resolved start/end, filter, page size, offset,
+and an endpoint fingerprint. It is not a credential, but its filter can contain
+sensitive information: treat it like query output. It cannot be combined with
+`--since`, `--start`, `--end`, `--where`, `--limit`, or `--offset`. You can change
+`--pages`, the timeout, or the context, provided the endpoint stays the same.
+
+The CLI uses offset pagination with deterministic timestamp/ID ordering. SigNoz
+v0.132.0's native cursor contains only a millisecond timestamp and can skip records
+sharing that timestamp. The original `next_cursor` is retained for transparency,
+but **resume with `next_page_token`, not the native cursor**. Tokens are unsigned
+query state, not an authorization mechanism. The selected context still supplies
+authentication.
+
+Manual `--offset` is available up to 1000000 and requires explicit `--start` and
+`--end`. Frozen bounds are not a database snapshot: ingestion, retention, or
+migration can still change subsequent offset pages. Full pages may have a next
+token even if the following page is empty; this avoids an extra probe request.
+
+## Traces
+
+```sh
+sig traces search --where "service.name = 'checkout' AND has_error = true" --since 1h
+sig traces get "$TRACE_ID"
+sig traces get "$TRACE_ID" --span "$SPAN_ID" --expand "$SPAN_ID"
+```
+
+Search returns **spans**, not distinct traces. Its filter syntax and pagination
+match log search. Ties are ordered by trace ID and span ID. Use field discovery
+to find attributes, or filter `parent_span_id = ''` when you need root spans.
+
+`traces get` uses the waterfall API. Trace IDs must be nonzero 32-character hex
+strings; span IDs must be nonzero 16-character hex strings. The response preserves
+`hasMore`, `hasMissingSpans`, and expansion state, with `meta.completeness` set to
+`partial` when appropriate. Large traces can be windowed; the CLI does not claim
+that a waterfall contains every span. Returned waterfall timestamps are
+milliseconds; durations remain nanoseconds.
+
+## Metrics
+
+```sh
+sig metrics list --search cpu --since 1h
+sig metrics query 'sum(rate(http_requests_total[5m]))' --since 1h --step 1m
+sig metrics query 'vector(1)' --since 5m --step 30s
+sig metrics query 'vector(1)' --since 5m --step 30s --no-cache
+```
+
+PromQL uses the v5 time-series API. Steps must be whole seconds, with at most 11000
+points per series. Response size and HTTP timeouts also apply; there is no implied
+series-cardinality limit. Metric names are deployment-specific; discover them
+before constructing a query. OTel names with dots can be selected using a label
+selector such as `{__name__="system.cpu.utilization"}`.
+
+Caching is controlled by SigNoz. Use `--no-cache` when comparing reproducible
+results: the tested server can include different boundary points on cold versus
+warm cache requests. The CLI does not silently rewrite those results or disable
+the cache by default. Native JSON queries can also set `"noCache": true`.
+
+Metric listing returns names and metadata, with a limit of 1-5000. The upstream
+listing has no continuation token or completeness flag, so the CLI reports its
+completeness as `unknown` rather than claiming a complete inventory.
+
+## Discovery
+
+```sh
+sig services list --signal traces --since 1h
+sig logs fields --search k8s --since 1h
+sig logs values service.name --since 1h
+sig traces fields
+sig traces values service.name --where "has_error = true"
+sig metrics fields --metric system.cpu.utilization
+sig metrics values host.name --metric system.cpu.utilization
+```
+
+`fields` returns field descriptors grouped by the API, including type and context.
+`values` returns typed string/number/bool value collections. `--field-context`,
+`--data-type`, `--search`, and bounded limits help disambiguate names. Service
+listing is resource `service.name` value discovery in the selected signal.
+
+The API's `complete` field is retained. Discovery has no supported continuation
+mechanism, and this SigNoz release rounds its start bound down to a six-hour
+boundary. Do not interpret discovery as an exact-window or exhaustive inventory.
+
+## Native Queries
+
+"Advanced queries" means **native SigNoz v5 JSON**, not another query language.
+Use this for aggregations, grouped counts, metric builder queries, formulas,
+joins, or SQL that cannot be expressed through the search/PromQL flags.
+
+```sh
+# Adjust the synthetic example's millisecond start/end bounds before running.
+sig query run --file examples/log-count.json
+sig query preview --file examples/log-count.json
+sig query run --file - < examples/metric-builder.json
+```
+
+Files or stdin must contain one JSON object of at most 1 MiB, with positive epoch
+millisecond `start` and `end`, a supported `requestType` (`raw`, `scalar`,
+`time_series`, or `trace`), and `compositeQuery.queries`. Other native fields pass
+through without translating expressions or rounding numbers. Server validation
+governs the full query schema. Streaming requests are not supported.
+
+Query execution and metric queries preserve the v5 response inside CLI `data`,
+including native statistics and warnings. Results are at `.data.data.results`.
+No automatic pagination or client-side row limiting is added to native requests;
+specify appropriate bounds/limits in the payload. HTTP timeout and response-size
+limits still apply.
+
+**Native SQL is not a read-only sandbox.** SigNoz and its database permissions
+govern execution. `query run` is marked `server_defined` in the agent schema,
+rather than incorrectly declaring every JSON query read-only.
+
+Preview returns per-query `valid` and `error` verdicts. Exit 0 means the preview
+operation succeeded, not that every query is valid. Preview may contact ClickHouse
+even without `--verbose`; the flag enables additional analysis. It is not an
+offline validator or a guarantee that executing the query will succeed.
+
+## Agent Schema
+
+```sh
+sig agent schema
+sig agent schema logs search
+sig agent schema query run
+```
+
+The schema is a command-discovery document generated from the command tree. It
+includes typed flags and defaults, required flags, positional usage, explicit
+operation safety, query languages, pagination modes, and output/exit conventions.
+It is not a complete JSON Schema for every upstream SigNoz payload.
+
+Schema generation is local: it does not load contexts, access the keychain, or
+query the server. It never includes invocation-specific credentials or URLs.
+Adding a command without explicit safety metadata fails schema generation and
+its regression test, rather than guessing safety from the command name.
 
 ## Output And Errors
 
@@ -165,9 +311,14 @@ A synthetic log response:
     "end": "2026-01-01T12:15:00Z",
     "returned": 0,
     "limit": 100,
+    "offset": 0,
+    "pages": 1,
+    "pagination": "offset",
+    "next_page_token": "",
     "next_cursor": "",
     "completeness": "complete",
-    "warning": null
+    "warning": null,
+    "warnings": []
   }
 }
 ```
@@ -209,6 +360,7 @@ task vuln        # opt-in Go vulnerability scan; requires network access
 task fmt
 task tidy
 task install
+task build VERSION=v1.0.0-rc.1
 ```
 
 Tests use synthetic fixtures, local HTTP test servers, and an in-memory credential
@@ -218,6 +370,11 @@ use synthetic input in a pseudo-terminal. These optional tests report skips when
 their tools are unavailable. Native Windows terminal behavior needs separate
 operator verification. Live compatibility and real keychain integration require
 the opt-in checks below.
+
+CI is configured to run formatting, vet, and race-enabled tests on Linux, macOS, and Windows. It
+does not have live credentials or run the opt-in suites. Versioned module installs
+report the module version; local builds report `dev` unless stamped through the
+Taskfile `VERSION` variable. No version tag or release publication is automatic.
 
 ### Live Smoke Tests
 
@@ -244,6 +401,7 @@ For comparison with known logs in the UI, optionally export:
 | `SIG_E2E_START` and `SIG_E2E_END` | An RFC3339 comparison window; provide both or neither. Defaults to the last hour. |
 | `SIG_E2E_WHERE` | Native filter for the comparison query, such as a service filter. |
 | `SIG_E2E_EXPECT_ID` | A known log ID that must appear among the five newest matching records. |
+| `SIG_E2E_TRACE_ID` | Optional known trace ID for `task test:api` waterfall verification when the comparison window has no spans. |
 
 The comparison query must return at least one record without a warning. The error
 filter query may legitimately return no records. Without an expected ID, the
@@ -264,9 +422,11 @@ same exported credentials and fixed comparison window:
 task test:api
 ```
 
-This builds a temporary CLI binary and compares service-account identity, complete
-log rows (preserving JSON numeric precision), cursors, warnings, limits, filters,
-and authentication/query error statuses. It uses environment credentials only,
+This builds a temporary CLI binary and compares identity, log/span search and
+pagination, trace waterfalls when data is available, metric listing and PromQL,
+discovery, native queries, preview, and error statuses. JSON numeric precision is
+preserved. Discovery value collections are compared without assuming order, and
+PromQL comparisons bypass the server cache. It uses environment credentials only,
 does not access the keychain, and does not print response contents. The `e2e` Go
 build tag keeps these tests out of ordinary test runs, and caching is disabled for
 the live task. Choose a stable historical window so separate requests see the same

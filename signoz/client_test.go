@@ -100,7 +100,7 @@ func TestSearchLogsRequestAndPrecision(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"success","data":{"type":"raw","data":{"results":[{"queryName":"A","rows":[{"timestamp":"2026-01-01T00:00:00Z","data":{"duration_nano":9007199254740993}}],"nextCursor":"opaque-cursor"}]},"warning":{"message":"Synthetic partial result"}}}`)
 	})
-	got, err := c.SearchLogs(context.Background(), LogOptions{Start: time.UnixMilli(1000), End: time.UnixMilli(2000), Limit: 100, Where: "service.name = 'checkout'"})
+	got, err := c.SearchLogs(context.Background(), SearchOptions{Start: time.UnixMilli(1000), End: time.UnixMilli(2000), Limit: 100, Where: "service.name = 'checkout'"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestLogCompleteness(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprintf(w, `{"status":"success","data":{"type":"raw","data":{"results":[{"queryName":"A","rows":%s,"nextCursor":%q}]}%s}}`, tt.rows, tt.cursor, tt.warning)
 			})
-			got, err := c.SearchLogs(context.Background(), LogOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: tt.limit})
+			got, err := c.SearchLogs(context.Background(), SearchOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: tt.limit})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -222,7 +222,7 @@ func TestLogValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, opts := range []LogOptions{
+	for _, opts := range []SearchOptions{
 		{Start: time.Unix(2, 0), End: time.Unix(1, 0), Limit: 100},
 		{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 0},
 		{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 10001},
@@ -244,7 +244,7 @@ func TestMalformedLogResponses(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"status":"success","data":%s}`, data)
 		})
-		_, err := c.SearchLogs(context.Background(), LogOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 100})
+		_, err := c.SearchLogs(context.Background(), SearchOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 100})
 		assertCode(t, err, "invalid_response")
 	}
 }

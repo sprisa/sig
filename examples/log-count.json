@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "v1",
+  "start": 1767225600000,
+  "end": 1767229200000,
+  "requestType": "scalar",
+  "compositeQuery": {
+    "queries": [
+      {
+        "type": "builder_query",
+        "spec": {
+          "name": "A",
+          "signal": "logs",
+          "filter": {"expression": "severity_text = 'ERROR'"},
+          "aggregations": [{"expression": "count()"}],
+          "groupBy": [{"name": "service.name", "fieldContext": "resource"}],
+          "limit": 20
+        }
+      }
+    ]
+  }
+}

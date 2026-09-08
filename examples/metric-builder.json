@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "v1",
+  "start": 1767225600000,
+  "end": 1767229200000,
+  "requestType": "time_series",
+  "compositeQuery": {
+    "queries": [
+      {
+        "type": "builder_query",
+        "spec": {
+          "name": "A",
+          "signal": "metrics",
+          "stepInterval": 60,
+          "aggregations": [
+            {
+              "metricName": "system.cpu.utilization",
+              "timeAggregation": "latest",
+              "spaceAggregation": "avg"
+            }
+          ],
+          "groupBy": [{"name": "host.name", "fieldContext": "resource"}]
+        }
+      }
+    ]
+  }
+}

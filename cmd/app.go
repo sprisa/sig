@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"time"
 
@@ -118,20 +119,19 @@ func (a *app) command() *cli.Command {
 				{Name: "use-context", Usage: "Select a context", ArgsUsage: "NAME", Action: a.useContext},
 				{Name: "delete-context", Usage: "Delete a context and its stored credential", ArgsUsage: "NAME", Action: a.deleteContext},
 			}},
-			{Name: "logs", Usage: "Query log records", Commands: []*cli.Command{
-				{Name: "search", Usage: "Retrieve one bounded page of newest logs", Flags: []cli.Flag{
-					&cli.StringFlag{Name: "where", Usage: "Native SigNoz filter expression"},
-					&cli.DurationFlag{Name: "since", Value: 15 * time.Minute, Usage: "Lookback from the end time (mutually exclusive with --start)"},
-					&cli.StringFlag{Name: "start", Usage: "Inclusive start time in RFC3339"},
-					&cli.StringFlag{Name: "end", Usage: "End time in RFC3339 (default: now)"},
-					&cli.IntFlag{Name: "limit", Value: 100, Usage: "Maximum records, from 1 to 10000"},
-				}, Action: a.logs},
+			a.signalCommand("logs"),
+			a.signalCommand("traces"),
+			a.metricsCommand(),
+			a.servicesCommand(),
+			a.queryCommand(),
+			{Name: "agent", Usage: "Machine-readable command discovery", Commands: []*cli.Command{
+				{Name: "schema", Usage: "Describe commands, flags, safety, and output contracts as JSON", ArgsUsage: "[COMMAND [SUBCOMMAND]]", Action: a.schema},
 			}},
 			{Name: "version", Usage: "Print the CLI version as JSON", Action: func(_ context.Context, cmd *cli.Command) error {
 				if err := noArgs(cmd); err != nil {
 					return err
 				}
-				return a.emit(map[string]string{"version": Version}, nil)
+				return a.emit(map[string]string{"version": buildVersion()}, nil)
 			}},
 		},
 	}
@@ -339,50 +339,38 @@ func (a *app) deleteContext(_ context.Context, cmd *cli.Command) error {
 	return a.emit(map[string]any{"context": name, "deleted": true}, nil)
 }
 
-func (a *app) logs(ctx context.Context, cmd *cli.Command) error {
-	if err := noArgs(cmd); err != nil {
-		return err
-	}
+func (a *app) timeWindow(cmd *cli.Command) (time.Time, time.Time, error) {
 	end := a.Now().UTC().Truncate(time.Millisecond)
 	if cmd.IsSet("end") {
 		parsed, err := time.Parse(time.RFC3339Nano, cmd.String("end"))
 		if err != nil {
-			return fail("usage", "--end must be an RFC3339 timestamp with a timezone")
+			return time.Time{}, time.Time{}, fail("usage", "--end must be an RFC3339 timestamp with a timezone")
 		}
 		end = parsed.UTC().Truncate(time.Millisecond)
 	}
 	if cmd.IsSet("start") && cmd.IsSet("since") {
-		return fail("usage", "--start and --since are mutually exclusive")
+		return time.Time{}, time.Time{}, fail("usage", "--start and --since are mutually exclusive")
 	}
 	if cmd.Duration("since") <= 0 {
-		return fail("usage", "--since must be positive")
+		return time.Time{}, time.Time{}, fail("usage", "--since must be positive")
 	}
 	start := end.Add(-cmd.Duration("since")).Truncate(time.Millisecond)
 	if cmd.IsSet("start") {
 		parsed, err := time.Parse(time.RFC3339Nano, cmd.String("start"))
 		if err != nil {
-			return fail("usage", "--start must be an RFC3339 timestamp with a timezone")
+			return time.Time{}, time.Time{}, fail("usage", "--start must be an RFC3339 timestamp with a timezone")
 		}
 		start = parsed.UTC().Truncate(time.Millisecond)
 	}
-	if !start.Before(end) {
-		return fail("usage", "start must precede end by at least one millisecond")
+	return start, end, signoz.ValidateWindow(start, end)
+}
+
+func buildVersion() string {
+	if Version != "dev" {
+		return Version
 	}
-	limit := cmd.Int("limit")
-	if limit < 1 || limit > 10000 {
-		return fail("usage", "--limit must be between 1 and 10000")
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
 	}
-	client, name, _, _, err := a.connect(cmd)
-	if err != nil {
-		return err
-	}
-	result, err := client.SearchLogs(ctx, signoz.LogOptions{Start: start, End: end, Limit: limit, Where: cmd.String("where")})
-	if err != nil {
-		return err
-	}
-	return a.emit(result.Rows, map[string]any{
-		"schema_version": "1", "context": name, "signal": "logs", "start": start, "end": end,
-		"returned": len(result.Rows), "limit": limit, "next_cursor": result.NextCursor,
-		"completeness": result.Completeness, "warning": result.Warning,
-	})
+	return Version
 }

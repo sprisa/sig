@@ -2,6 +2,9 @@
 
 version: '3'
 
+vars:
+  VERSION: dev
+
 tasks:
   default:
     desc: List available tasks
@@ -12,7 +15,7 @@ tasks:
   build:
     desc: Build bin/sig
     cmds:
-      - go build -trimpath -o bin/sig .
+      - go build -trimpath -ldflags "-X github.com/sprisa/sig/cmd.Version={{.VERSION}}" -o bin/sig .
 
   install:
     desc: Install sig into GOBIN (or GOPATH/bin)

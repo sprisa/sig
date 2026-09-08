@@ -63,7 +63,7 @@ func New(rawURL, key string, timeout time.Duration) (*Client, error) {
 	}}, nil
 }
 
-func (c *Client) request(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
+func (c *Client) request(ctx context.Context, method, path string, body any, params url.Values) (json.RawMessage, error) {
 	var input io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -77,6 +77,7 @@ func (c *Client) request(ctx context.Context, method, path string, body any) (js
 	if u.RawPath != "" {
 		u.RawPath += path
 	}
+	u.RawQuery = params.Encode()
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), input)
 	if err != nil {
 		return nil, &Error{Code: "usage", Message: "could not construct request"}
@@ -104,7 +105,7 @@ func (c *Client) request(ctx context.Context, method, path string, body any) (js
 		case resp.StatusCode == 400:
 			e.Code, e.Message = "invalid_query", "API rejected the request; check filter syntax and API compatibility"
 		case resp.StatusCode == 404:
-			e.Message = "API endpoint not found; check the base URL and supported SigNoz version"
+			e.Message = "API resource or endpoint not found; check the identifier, base URL, and supported SigNoz version"
 		case resp.StatusCode == 429:
 			e.Code, e.Message = "rate_limited", "API rate limit reached; wait before retrying"
 		}
@@ -144,7 +145,7 @@ func transportError(ctx context.Context, err error) error {
 }
 
 func (c *Client) Me(ctx context.Context) (json.RawMessage, error) {
-	data, err := c.request(ctx, http.MethodGet, "/api/v1/service_accounts/me", nil)
+	data, err := c.request(ctx, http.MethodGet, "/api/v1/service_accounts/me", nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -157,29 +158,45 @@ func (c *Client) Me(ctx context.Context) (json.RawMessage, error) {
 	return data, nil
 }
 
-type LogOptions struct {
+type SearchOptions struct {
 	Start, End time.Time
 	Limit      int
 	Where      string
+	Offset     int
 }
 
-type LogResult struct {
+type SearchResult struct {
 	Rows         []json.RawMessage
 	NextCursor   string
 	Warning      json.RawMessage
 	Completeness string
 }
 
-func (c *Client) SearchLogs(ctx context.Context, opts LogOptions) (LogResult, error) {
-	if opts.Start.UnixMilli() >= opts.End.UnixMilli() || opts.Limit < 1 || opts.Limit > 10000 {
-		return LogResult{}, &Error{Code: "usage", Message: "logs require start before end and a limit between 1 and 10000"}
+func (c *Client) SearchLogs(ctx context.Context, opts SearchOptions) (SearchResult, error) {
+	return c.search(ctx, "logs", opts)
+}
+
+func (c *Client) SearchTraces(ctx context.Context, opts SearchOptions) (SearchResult, error) {
+	return c.search(ctx, "traces", opts)
+}
+
+func (c *Client) search(ctx context.Context, signal string, opts SearchOptions) (SearchResult, error) {
+	if err := ValidateWindow(opts.Start, opts.End); err != nil {
+		return SearchResult{}, err
+	}
+	if opts.Limit < 1 || opts.Limit > 10000 || opts.Offset < 0 || opts.Offset > 1000000 {
+		return SearchResult{}, &Error{Code: "usage", Message: "search requires a limit between 1 and 10000 and an offset between 0 and 1000000"}
+	}
+	order := []any{map[string]any{"key": map[string]string{"name": "timestamp"}, "direction": "desc"}}
+	ties := []string{"id"}
+	if signal == "traces" {
+		ties = []string{"trace_id", "span_id"}
+	}
+	for _, name := range ties {
+		order = append(order, map[string]any{"key": map[string]string{"name": name}, "direction": "desc"})
 	}
 	spec := map[string]any{
-		"name": "A", "signal": "logs", "limit": opts.Limit, "offset": 0,
-		"order": []any{
-			map[string]any{"key": map[string]string{"name": "timestamp"}, "direction": "desc"},
-			map[string]any{"key": map[string]string{"name": "id"}, "direction": "desc"},
-		},
+		"name": "A", "signal": signal, "limit": opts.Limit, "offset": opts.Offset, "order": order,
 	}
 	if opts.Where != "" {
 		spec["filter"] = map[string]string{"expression": opts.Where}
@@ -187,9 +204,9 @@ func (c *Client) SearchLogs(ctx context.Context, opts LogOptions) (LogResult, er
 	data, err := c.request(ctx, http.MethodPost, "/api/v5/query_range", map[string]any{
 		"schemaVersion": "v1", "start": opts.Start.UnixMilli(), "end": opts.End.UnixMilli(), "requestType": "raw",
 		"compositeQuery": map[string]any{"queries": []any{map[string]any{"type": "builder_query", "spec": spec}}},
-	})
+	}, nil)
 	if err != nil {
-		return LogResult{}, err
+		return SearchResult{}, err
 	}
 	var response struct {
 		Type string `json:"type"`
@@ -203,12 +220,12 @@ func (c *Client) SearchLogs(ctx context.Context, opts LogOptions) (LogResult, er
 		Warning json.RawMessage `json:"warning"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil || response.Type != "raw" || len(response.Data.Results) != 1 || response.Data.Results[0].QueryName != "A" {
-		return LogResult{}, &Error{Code: "invalid_response", Message: "unexpected log query response; check SigNoz API compatibility"}
+		return SearchResult{}, &Error{Code: "invalid_response", Message: "unexpected search response; check SigNoz API compatibility"}
 	}
 	raw := response.Data.Results[0]
 	var rows []json.RawMessage
 	if err := json.Unmarshal(raw.Rows, &rows); err != nil {
-		return LogResult{}, &Error{Code: "invalid_response", Message: "API did not return a log row array"}
+		return SearchResult{}, &Error{Code: "invalid_response", Message: "API did not return a row array"}
 	}
 	if rows == nil {
 		rows = []json.RawMessage{}
@@ -228,5 +245,5 @@ func (c *Client) SearchLogs(ctx context.Context, opts LogOptions) (LogResult, er
 		raw.NextCursor = "" // The server cursor would skip rows discarded locally.
 		completeness = "more_available"
 	}
-	return LogResult{Rows: rows, NextCursor: raw.NextCursor, Warning: response.Warning, Completeness: completeness}, nil
+	return SearchResult{Rows: rows, NextCursor: raw.NextCursor, Warning: response.Warning, Completeness: completeness}, nil
 }

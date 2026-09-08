@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -47,8 +47,12 @@ func (a *app) login(ctx context.Context, cmd *cli.Command) error {
 	}
 	key := a.Getenv("SIGNOZ_API_KEY")
 	if cmd.Bool("key-stdin") {
-		b, err := io.ReadAll(io.LimitReader(a.In, 65537))
-		if err != nil || len(b) > 65536 {
+		b, err := readBoundedInput(ctx, a.In, 65536)
+		if err != nil {
+			var inputErr *signoz.Error
+			if errors.As(err, &inputErr) && inputErr.Code == "cancelled" {
+				return err
+			}
 			return fail("credentials", "could not read API key from stdin (maximum 64 KiB)")
 		}
 		key = strings.TrimSpace(string(b))
