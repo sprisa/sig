@@ -1,8 +1,10 @@
 package cmd
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
+	"io"
 	"strconv"
 
 	"github.com/sprisa/sig/config"
@@ -43,7 +45,7 @@ func (a *app) report(err error) int {
 	default:
 		api = &signoz.Error{Code: "internal", Message: "command failed"}
 	}
-	_ = json.NewEncoder(a.ErrOut).Encode(struct {
+	_ = json.MarshalEncode(jsontext.NewEncoder(outputWriter{a.ErrOut}), struct {
 		Error *signoz.Error `json:"error"`
 	}{api})
 	for _, entry := range exitDefinitions {
@@ -59,10 +61,21 @@ func (a *app) report(err error) int {
 func (a *app) emit(data, meta any) error {
 	result := struct {
 		Data any `json:"data"`
-		Meta any `json:"meta,omitempty"`
+		Meta any `json:"meta,omitzero"`
 	}{data, meta}
-	if err := json.NewEncoder(a.Out).Encode(result); err != nil {
+	if err := json.MarshalEncode(jsontext.NewEncoder(outputWriter{a.Out}), result, json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true)); err != nil {
 		return fail("output", "could not write JSON output")
 	}
 	return nil
+}
+
+// jsontext does not report a writer's short write with a nil error.
+type outputWriter struct{ io.Writer }
+
+func (w outputWriter) Write(p []byte) (int, error) {
+	n, err := w.Writer.Write(p)
+	if n < len(p) && err == nil {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }

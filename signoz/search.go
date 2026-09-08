@@ -2,7 +2,7 @@ package signoz
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"slices"
 )
@@ -29,9 +29,9 @@ type searchKey struct {
 // SearchPage contains API facts only. The collector owns continuation and
 // completeness, including the upstream cursor's loss of timestamp ties.
 type SearchPage struct {
-	Rows       []json.RawMessage
+	Rows       []jsontext.Value
 	NextCursor string
-	Warning    json.RawMessage
+	Warning    jsontext.Value
 	Truncated  bool
 }
 
@@ -39,31 +39,31 @@ func (c *Client) Search(ctx context.Context, r SearchRequest) (SearchPage, error
 	if err := r.Validate(); err != nil {
 		return SearchPage{}, err
 	}
-	keys := []string{"timestamp", "id"}
+	order := [3]searchOrder{{Key: searchKey{Name: "timestamp"}, Direction: "desc"}, {Key: searchKey{Name: "id"}, Direction: "desc"}}
+	orderLen := 2
 	if r.Signal == Traces {
-		keys = []string{"timestamp", "trace_id", "span_id"}
+		order[1].Key.Name = "trace_id"
+		order[2] = searchOrder{Key: searchKey{Name: "span_id"}, Direction: "desc"}
+		orderLen = 3
 	}
-	spec := searchSpec{Name: "A", Signal: r.Signal, Limit: r.Limit, Offset: r.Offset}
-	for _, key := range keys {
-		spec.Order = append(spec.Order, searchOrder{Key: searchKey{Name: key}, Direction: "desc"})
-	}
+	spec := searchSpec{Name: "A", Signal: r.Signal, Limit: r.Limit, Offset: r.Offset, Order: order[:orderLen]}
 	if r.Where != "" {
 		spec.Filter = &searchFilter{Expression: r.Where}
 	}
 	type searchResponse struct {
-		Type string
+		Type string `json:"type"`
 		Data struct {
 			Results []struct {
-				QueryName  string
-				Rows       nullableRows
-				NextCursor string
-			}
-		}
-		Warning json.RawMessage
+				QueryName  string       `json:"queryName"`
+				Rows       nullableRows `json:"rows"`
+				NextCursor string       `json:"nextCursor"`
+			} `json:"results"`
+		} `json:"data"`
+		Warning jsontext.Value `json:"warning"`
 	}
-	response, err := request[searchResponse](ctx, c, http.MethodPost, "/api/v5/query_range", queryRequest{
+	response, err := request[searchResponse](ctx, c, http.MethodPost, "/api/v5/query_range", queryRequest[searchSpec]{
 		SchemaVersion: "v1", Start: r.Start.UnixMilli(), End: r.End.UnixMilli(), RequestType: "raw",
-		CompositeQuery: compositeQuery{Queries: []queryEnvelope{{Type: "builder_query", Spec: spec}}},
+		CompositeQuery: compositeQuery[searchSpec]{Queries: [1]queryEnvelope[searchSpec]{{Type: "builder_query", Spec: spec}}},
 	}, nil)
 	if err != nil {
 		return SearchPage{}, err
@@ -77,7 +77,7 @@ func (c *Client) Search(ctx context.Context, r SearchRequest) (SearchPage, error
 	}
 	rows := wire.Rows.Values
 	if rows == nil {
-		rows = []json.RawMessage{}
+		rows = []jsontext.Value{}
 	}
 	page := SearchPage{Rows: rows, NextCursor: wire.NextCursor, Warning: response.Warning}
 	if string(page.Warning) == "null" {
@@ -102,11 +102,11 @@ func (b PageBudget) Validate(limit int) error {
 }
 
 type SearchResult struct {
-	Rows         []json.RawMessage
+	Rows         []jsontext.Value
 	Pages        int
 	NextOffset   *int
 	NextCursor   string
-	Warnings     []json.RawMessage
+	Warnings     []jsontext.Value
 	Completeness string
 }
 
@@ -123,7 +123,8 @@ func collectPages(ctx context.Context, r SearchRequest, b PageBudget, fetch func
 	if err := b.Validate(r.Limit); err != nil {
 		return SearchResult{}, err
 	}
-	result := SearchResult{Rows: []json.RawMessage{}, Warnings: []json.RawMessage{}, Completeness: "unknown"}
+	result := SearchResult{Rows: []jsontext.Value{}, Warnings: []jsontext.Value{}, Completeness: "unknown"}
+	canContinue := false
 	totalBytes := 0
 	for result.Pages < b.Pages {
 		page, err := fetch(ctx, r)
@@ -137,7 +138,14 @@ func collectPages(ctx context.Context, r SearchRequest, b PageBudget, fetch func
 		if totalBytes > maxResponseBytes {
 			return SearchResult{}, &Error{Code: "response_too_large", Message: "combined search results exceed 16 MiB; reduce limit or pages"}
 		}
-		result.Rows = append(result.Rows, page.Rows...)
+		if result.Pages == 0 {
+			result.Rows = page.Rows
+		} else {
+			if result.Pages == 1 {
+				result.Rows = slices.Grow(result.Rows, r.Limit*b.Pages-len(result.Rows))
+			}
+			result.Rows = append(result.Rows, page.Rows...)
+		}
 		result.Pages++
 		result.NextCursor = page.NextCursor
 		if len(page.Warning) > 0 {
@@ -145,11 +153,7 @@ func collectPages(ctx context.Context, r SearchRequest, b PageBudget, fetch func
 		}
 		filled := len(page.Rows) == r.Limit
 		r.Offset += len(page.Rows)
-		result.NextOffset = nil
-		if filled && r.Offset <= MaxSearchOffset {
-			next := r.Offset
-			result.NextOffset = &next
-		}
+		canContinue = filled && r.Offset <= MaxSearchOffset
 		// Warnings take precedence over continuation hints. A cursor without a
 		// full page is not proof of exhaustion and cannot be followed safely.
 		if len(result.Warnings) > 0 {
@@ -167,9 +171,13 @@ func collectPages(ctx context.Context, r SearchRequest, b PageBudget, fetch func
 		} else {
 			result.Completeness = "unknown"
 		}
-		if result.NextOffset == nil {
+		if !canContinue {
 			break
 		}
+	}
+	if canContinue {
+		next := r.Offset
+		result.NextOffset = &next
 	}
 	return result, nil
 }

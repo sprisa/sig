@@ -2,7 +2,8 @@ package signoz
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,7 +15,7 @@ func (c *Client) Query(ctx context.Context, q NativeQuery) (QueryResult, error) 
 	if q.kind == "" {
 		return QueryResult{}, usage("native query must be parsed before execution")
 	}
-	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v5/query_range", q.payload, nil)
+	data, err := request[jsontext.Value](ctx, c, http.MethodPost, "/api/v5/query_range", q.payload, nil)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -25,7 +26,7 @@ func (c *Client) Preview(ctx context.Context, q NativeQuery, verbose bool) (Prev
 	if q.kind == "" {
 		return PreviewResult{}, usage("native query must be parsed before preview")
 	}
-	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v5/query_range/preview", q.payload, url.Values{"verbose": {strconv.FormatBool(verbose)}})
+	data, err := request[jsontext.Value](ctx, c, http.MethodPost, "/api/v5/query_range/preview", q.payload, url.Values{"verbose": {strconv.FormatBool(verbose)}})
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -36,9 +37,9 @@ func (c *Client) MetricsQuery(ctx context.Context, r MetricsQueryRequest) (Query
 	if err := r.Validate(); err != nil {
 		return QueryResult{}, err
 	}
-	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v5/query_range", queryRequest{
+	data, err := request[jsontext.Value](ctx, c, http.MethodPost, "/api/v5/query_range", queryRequest[promSpec]{
 		SchemaVersion: "v1", Start: r.Start.UnixMilli(), End: r.End.UnixMilli(), RequestType: "time_series", NoCache: r.NoCache,
-		CompositeQuery: compositeQuery{Queries: []queryEnvelope{{Type: "promql", Spec: promSpec{Name: "A", Query: r.Expression, Step: int64(r.Step / time.Second)}}}},
+		CompositeQuery: compositeQuery[promSpec]{Queries: [1]queryEnvelope[promSpec]{{Type: "promql", Spec: promSpec{Name: "A", Query: r.Expression, Step: int64(r.Step / time.Second)}}}},
 	}, nil)
 	if err != nil {
 		return QueryResult{}, err
@@ -58,15 +59,16 @@ func (c *Client) Trace(ctx context.Context, r TraceRequest) (TraceResult, error)
 		Selected string   `json:"selectedSpanId"`
 		Expanded []string `json:"uncollapsedSpans"`
 	}{strings.ToLower(r.SelectedSpan), expanded}
-	data, err := request[json.RawMessage](ctx, c, http.MethodPost, "/api/v4/traces/"+strings.ToLower(r.ID)+"/waterfall", body, nil)
+	data, err := request[jsontext.Value](ctx, c, http.MethodPost, "/api/v4/traces/"+strings.ToLower(r.ID)+"/waterfall", body, nil)
 	if err != nil {
 		return TraceResult{}, err
 	}
 	var wire struct {
-		Spans                    nullableRows
-		HasMore, HasMissingSpans *bool
+		Spans           nullableRows `json:"spans"`
+		HasMore         *bool        `json:"hasMore"`
+		HasMissingSpans *bool        `json:"hasMissingSpans"`
 	}
-	if json.Unmarshal(data, &wire) != nil || wire.HasMore == nil || wire.HasMissingSpans == nil || !wire.Spans.Present {
+	if json.Unmarshal(data, &wire) != nil || !wire.Spans.Present || wire.HasMore == nil || wire.HasMissingSpans == nil {
 		return TraceResult{}, invalidResponse("unexpected trace waterfall response")
 	}
 	return TraceResult{Raw: data, Spans: wire.Spans.Values, HasMore: *wire.HasMore, HasMissingSpans: *wire.HasMissingSpans}, nil
@@ -80,7 +82,9 @@ func (c *Client) MetricsList(ctx context.Context, r MetricsListRequest) (Metrics
 	if r.Search != "" {
 		params.Set("searchText", r.Search)
 	}
-	wire, err := request[struct{ Metrics nullableRows }](ctx, c, http.MethodGet, "/api/v2/metrics", nil, params)
+	wire, err := request[struct {
+		Metrics nullableRows `json:"metrics"`
+	}](ctx, c, http.MethodGet, "/api/v2/metrics", nil, params)
 	if err != nil {
 		return MetricsListResult{}, err
 	}
@@ -89,25 +93,25 @@ func (c *Client) MetricsList(ctx context.Context, r MetricsListRequest) (Metrics
 	}
 	metrics := wire.Metrics.Values
 	if metrics == nil {
-		metrics = []json.RawMessage{}
+		metrics = []jsontext.Value{}
 	}
 	return MetricsListResult{Metrics: metrics}, nil
 }
 
-type queryRequest struct {
-	SchemaVersion  string         `json:"schemaVersion"`
-	Start          int64          `json:"start"`
-	End            int64          `json:"end"`
-	RequestType    string         `json:"requestType"`
-	NoCache        bool           `json:"noCache,omitempty"`
-	CompositeQuery compositeQuery `json:"compositeQuery"`
+type queryRequest[S any] struct {
+	SchemaVersion  string            `json:"schemaVersion"`
+	Start          int64             `json:"start"`
+	End            int64             `json:"end"`
+	RequestType    string            `json:"requestType"`
+	NoCache        bool              `json:"noCache,omitzero"`
+	CompositeQuery compositeQuery[S] `json:"compositeQuery"`
 }
-type compositeQuery struct {
-	Queries []queryEnvelope `json:"queries"`
+type compositeQuery[S any] struct {
+	Queries [1]queryEnvelope[S] `json:"queries"`
 }
-type queryEnvelope struct {
+type queryEnvelope[S any] struct {
 	Type string `json:"type"`
-	Spec any    `json:"spec"`
+	Spec S      `json:"spec"`
 }
 type promSpec struct {
 	Name  string `json:"name"`

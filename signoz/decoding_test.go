@@ -3,6 +3,7 @@ package signoz
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,8 +68,10 @@ func TestRequiredNullableRows(t *testing.T) {
 	}{
 		{`{}`, false, true}, {`{"rows":null}`, true, true}, {`{"rows":[]}`, true, false},
 	} {
-		var wire struct{ Rows nullableRows }
-		if err := json.Unmarshal([]byte(test.body), &wire); err != nil {
+		var wire struct {
+			Rows nullableRows `json:"rows"`
+		}
+		if err := jsonv2.Unmarshal([]byte(test.body), &wire); err != nil {
 			t.Fatal(err)
 		}
 		if wire.Rows.Present != test.present || (wire.Rows.Values == nil) != test.nilValues {

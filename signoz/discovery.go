@@ -2,7 +2,8 @@ package signoz
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,13 +23,13 @@ func (c *Client) FieldKeys(ctx context.Context, r FieldKeysRequest) (FieldKeysRe
 	if err := r.Validate(); err != nil {
 		return FieldKeysResult{}, err
 	}
-	data, err := request[json.RawMessage](ctx, c, http.MethodGet, "/api/v1/fields/keys", nil, discoveryParams(r))
+	data, err := request[jsontext.Value](ctx, c, http.MethodGet, "/api/v1/fields/keys", nil, discoveryParams(r))
 	if err != nil {
 		return FieldKeysResult{}, err
 	}
 	var wire struct {
-		Keys     json.RawMessage
-		Complete *bool
+		Keys     jsontext.Value `json:"keys"`
+		Complete *bool          `json:"complete"`
 	}
 	var keys map[string][]FieldKey
 	if json.Unmarshal(data, &wire) != nil || wire.Complete == nil || json.Unmarshal(wire.Keys, &keys) != nil {
@@ -46,13 +47,13 @@ func (c *Client) FieldValues(ctx context.Context, r FieldValuesRequest) (FieldVa
 	if r.Where != "" {
 		p.Set("existingQuery", r.Where)
 	}
-	data, err := request[json.RawMessage](ctx, c, http.MethodGet, "/api/v1/fields/values", nil, p)
+	data, err := request[jsontext.Value](ctx, c, http.MethodGet, "/api/v1/fields/values", nil, p)
 	if err != nil {
 		return FieldValuesResult{}, err
 	}
 	var wire struct {
-		Values   json.RawMessage
-		Complete *bool
+		Values   jsontext.Value `json:"values"`
+		Complete *bool          `json:"complete"`
 	}
 	var values FieldValues
 	if json.Unmarshal(data, &wire) != nil || wire.Complete == nil || json.Unmarshal(wire.Values, &values) != nil {

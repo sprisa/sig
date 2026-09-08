@@ -57,7 +57,10 @@ updated to follow production optimizations.
 
 **`perf:encode`** isolates encoding already-decoded raw rows. Encoder buffer pools
 can be reused in a long-running benchmark, so low `B/op` does not mean a fresh CLI
-process avoids allocating an output buffer.
+process avoids allocating an output buffer. It compares v1 encoding with v2's
+streaming `MarshalEncode` API. `BenchmarkCLIStreaming` (included in `task perf`)
+also exercises the actual command, metadata, and output-error adapter, including
+command setup and isolated configuration reads but excluding process startup.
 
 **`perf:resources`** launches the compiled CLI under `/usr/bin/time`: `-l` on macOS
 and GNU `-v` on Linux. The mock server lives outside the measured child process.
@@ -86,12 +89,32 @@ The 16 MiB response/content cap is **not** a heap or RSS limit. HTTP buffering,
 raw-subtree copies, typed views, page accumulation, and output encoding can all
 overlap. Multiple CLI processes multiply the resident-memory cost.
 
-The production search path now decodes the success envelope directly into typed
-search metadata and owned raw rows, instead of copying each intermediate query
-subtree. The `nested_raw` experiment intentionally retains the old strategy as a
-comparison baseline. Native query and trace results still retain their complete
-raw payloads where the public result contract requires them. HTTP reads and JSON
-output buffering remain allocation costs; this is not a zero-copy implementation.
+The production search path uses `encoding/json/v2.UnmarshalRead` on a bounded HTTP
+reader, decoding the success envelope directly into typed search metadata and
+owned `jsontext.Value` rows. The required nullable-array helper implements
+`UnmarshalJSONFrom`, avoiding an intermediate array buffer. Output uses
+`MarshalEncode` with a `jsontext.Encoder`; all requested pages finish successfully
+before output begins. Encoder storage scales with individual raw values rather
+than the entire row collection. A single large raw value can still require a
+large buffer. This is not a zero-copy implementation.
+
+The `nested_raw` and `direct_typed` experiments intentionally retain their v1
+strategies as comparison baselines. Native query and trace results still retain
+their complete raw payloads where the public result contract requires them.
+
+Initial Go 1.27.1/macOS arm64 (Apple M4 Pro) measurements with 300 ms runs put the
+near-cap collection-and-output pipeline at about 18.4 ms and 19 MB allocated per
+operation, compared with the previously recorded 34-38 ms and 119-128 MB before
+streaming. These are indicative measurements, not performance thresholds. The
+isolated warmed v1 encoder was slightly faster than v2 streaming (about 5.8 ms
+versus 6.1 ms near the cap); the streaming choice avoids whole-output buffering
+rather than claiming an isolated encoding speed win.
+
+Two fresh compiled CLI runs used about 35 MB peak RSS for the near-cap case
+(previously about 89 MB). The actual-command benchmark measured about 18.6 ms
+and 19.1 MB allocated for that case. Native raw-result retention remains more
+expensive than search: the near-cap retained-heap probe measured about 32.2 MB
+for the raw payload plus typed view, versus 18.2 MB for owned search rows.
 
 Do not compare race-enabled builds with normal benchmark runs. Keep Go version,
 `GOEXPERIMENT`, `GOGC`, `GOMEMLIMIT`, architecture, and workload constant when

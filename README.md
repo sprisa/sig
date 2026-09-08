@@ -338,6 +338,17 @@ Log rows retain the API's `{timestamp, data}` structure and JSON numeric precisi
 Completeness is `complete`, `unknown`, or `more_available`, based on the returned
 page and warning metadata; it is not a guarantee that ingestion itself is complete.
 
+API responses and native query input use `encoding/json/v2` validation: invalid
+UTF-8 and duplicate object names are rejected, and interpreted field names are
+case-sensitive. Unknown telemetry fields and numeric representations are
+preserved. JSON whitespace, string escaping, and object-key order are not stable
+output contracts. Persisted configuration and pagination tokens retain their
+existing serialization.
+
+Responses are decoded from a bounded HTTP stream. Search output is streamed only
+after all requested pages succeed, without buffering the entire encoded result.
+A write failure can leave partial stdout; consumers must check the exit status.
+
 ```json
 {"error":{"code":"authentication","message":"authentication rejected by SigNoz or an access proxy; check the key and endpoint access","http_status":401}}
 ```

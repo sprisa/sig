@@ -109,10 +109,25 @@ func (a *app) search(ctx context.Context, c *cli.Command, signal signoz.Signal) 
 	if len(result.Warnings) > 0 {
 		warning = result.Warnings[len(result.Warnings)-1]
 	}
-	return a.emit(result.Rows, map[string]any{
-		"schema_version": "1", "context": conn.Context, "signal": signal, "start": r.Start, "end": r.End,
-		"returned": len(result.Rows), "limit": r.Limit, "offset": r.Offset, "pages": result.Pages,
-		"next_page_token": next, "next_cursor": result.NextCursor, "pagination": "offset",
-		"completeness": result.Completeness, "warning": warning, "warnings": result.Warnings,
+	return a.emit(result.Rows, struct {
+		SchemaVersion string            `json:"schema_version"`
+		Context       string            `json:"context"`
+		Signal        signoz.Signal     `json:"signal"`
+		Start         time.Time         `json:"start"`
+		End           time.Time         `json:"end"`
+		Returned      int               `json:"returned"`
+		Limit         int               `json:"limit"`
+		Offset        int               `json:"offset"`
+		Pages         int               `json:"pages"`
+		NextPageToken string            `json:"next_page_token"`
+		NextCursor    string            `json:"next_cursor"`
+		Pagination    string            `json:"pagination"`
+		Completeness  string            `json:"completeness"`
+		Warning       json.RawMessage   `json:"warning"`
+		Warnings      []json.RawMessage `json:"warnings"`
+	}{
+		"1", conn.Context, signal, r.Start, r.End,
+		len(result.Rows), r.Limit, r.Offset, result.Pages,
+		next, result.NextCursor, "offset", result.Completeness, warning, result.Warnings,
 	})
 }

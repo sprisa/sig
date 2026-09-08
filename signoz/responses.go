@@ -1,49 +1,60 @@
 package signoz
 
-import "encoding/json"
+import (
+	jsonv1 "encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+)
 
 // Raw preserves fields not interpreted by the CLI, including large JSON numbers.
 // The typed views own validation and metadata; callers never reparse envelopes.
 type Identity struct {
 	ID  string
-	Raw json.RawMessage
+	Raw jsontext.Value
 }
 type QueryResult struct {
 	Type    string
-	Results []json.RawMessage
-	Warning json.RawMessage
-	Raw     json.RawMessage
+	Results []jsontext.Value
+	Warning jsontext.Value
+	Raw     jsontext.Value
 }
 type PreviewVerdict struct {
 	Valid bool
-	Error json.RawMessage
+	Error jsontext.Value
 }
 type PreviewResult struct {
 	Queries map[string]PreviewVerdict
-	Raw     json.RawMessage
+	Raw     jsontext.Value
 }
 type TraceResult struct {
-	Spans                    []json.RawMessage
+	Spans                    []jsontext.Value
 	HasMore, HasMissingSpans bool
-	Raw                      json.RawMessage
+	Raw                      jsontext.Value
 }
-type MetricsListResult struct{ Metrics []json.RawMessage }
-type FieldKey struct{ Name, Description, Unit, Signal, FieldContext, FieldDataType string }
+type MetricsListResult struct{ Metrics []jsontext.Value }
+type FieldKey struct {
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Unit          string `json:"unit"`
+	Signal        string `json:"signal"`
+	FieldContext  string `json:"fieldContext"`
+	FieldDataType string `json:"fieldDataType"`
+}
 type FieldValues struct {
-	StringValues  []string      `json:"stringValues"`
-	NumberValues  []json.Number `json:"numberValues"`
-	BoolValues    []bool        `json:"boolValues"`
-	RelatedValues []string      `json:"relatedValues"`
+	StringValues  []string        `json:"stringValues"`
+	NumberValues  []jsonv1.Number `json:"numberValues"`
+	BoolValues    []bool          `json:"boolValues"`
+	RelatedValues []string        `json:"relatedValues"`
 }
 type FieldKeysResult struct {
 	Keys     map[string][]FieldKey
 	Complete bool
-	Raw      json.RawMessage
+	Raw      jsontext.Value
 }
 type FieldValuesResult struct {
 	Values   FieldValues
 	Complete bool
-	Raw      json.RawMessage
+	Raw      jsontext.Value
 }
 
 func invalidResponse(message string) error { return &Error{Code: "invalid_response", Message: message} }
@@ -52,24 +63,26 @@ func invalidResponse(message string) error { return &Error{Code: "invalid_respon
 // RawMessage. Explicit null remains distinct from an absent field; endpoints
 // decide whether to normalize null to an empty slice. Each row owns its bytes.
 type nullableRows struct {
-	Values  []json.RawMessage
+	Values  []jsontext.Value
 	Present bool
 }
 
-func (r *nullableRows) UnmarshalJSON(data []byte) error {
-	var rows []json.RawMessage
-	if err := json.Unmarshal(data, &rows); err != nil {
+func (r *nullableRows) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	var rows []jsontext.Value
+	if err := json.UnmarshalDecode(dec, &rows); err != nil {
 		return err
 	}
 	r.Values, r.Present = rows, true
 	return nil
 }
 
-func decodeQueryResult(data json.RawMessage, kind string) (QueryResult, error) {
+func decodeQueryResult(data jsontext.Value, kind string) (QueryResult, error) {
 	var wire struct {
-		Type    string
-		Data    struct{ Results []json.RawMessage }
-		Warning json.RawMessage
+		Type string `json:"type"`
+		Data struct {
+			Results []jsontext.Value `json:"results"`
+		} `json:"data"`
+		Warning jsontext.Value `json:"warning"`
 	}
 	if json.Unmarshal(data, &wire) != nil || wire.Type != kind || wire.Data.Results == nil {
 		return QueryResult{}, invalidResponse("unexpected query result type or missing result array")
@@ -77,12 +90,12 @@ func decodeQueryResult(data json.RawMessage, kind string) (QueryResult, error) {
 	return QueryResult{Type: wire.Type, Results: wire.Data.Results, Warning: wire.Warning, Raw: data}, nil
 }
 
-func decodePreview(data json.RawMessage) (PreviewResult, error) {
+func decodePreview(data jsontext.Value) (PreviewResult, error) {
 	var wire struct {
 		CompositeQuery map[string]struct {
-			Valid *bool
-			Error json.RawMessage
-		}
+			Valid *bool          `json:"valid"`
+			Error jsontext.Value `json:"error"`
+		} `json:"compositeQuery"`
 	}
 	if json.Unmarshal(data, &wire) != nil || wire.CompositeQuery == nil {
 		return PreviewResult{}, invalidResponse("preview is missing query verdicts")

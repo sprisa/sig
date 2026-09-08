@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"io"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/sprisa/sig/cmd"
 	"github.com/sprisa/sig/signoz"
 )
 
@@ -131,7 +135,7 @@ func BenchmarkSearchAndOutput(b *testing.B) {
 				}{
 					result.Rows, map[string]any{"returned": len(result.Rows), "pages": result.Pages, "completeness": result.Completeness},
 				}
-				if err := json.NewEncoder(io.Discard).Encode(output); err != nil {
+				if err := jsonv2.MarshalEncode(jsontext.NewEncoder(io.Discard), output, jsonv2.FormatNilSliceAsNull(true), jsonv2.FormatNilMapAsNull(true)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -154,12 +158,47 @@ func BenchmarkEncodeRawRows(b *testing.B) {
 		output := struct {
 			Data any `json:"data"`
 		}{rows}
-		b.Run(s.name, func(b *testing.B) {
+		b.Run(s.name+"/v1", func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(data)))
 			for b.Loop() {
 				if err := json.NewEncoder(io.Discard).Encode(output); err != nil {
 					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(s.name+"/v2_stream", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				if err := jsonv2.MarshalEncode(jsontext.NewEncoder(io.Discard), output); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// Exercise the actual command output path as well as the isolated pipeline above.
+func BenchmarkCLIStreaming(b *testing.B) {
+	for _, s := range scenarios {
+		b.Run(s.name, func(b *testing.B) {
+			server, total := fixtureServer(b, s)
+			opts := cmd.Options{Out: io.Discard, ErrOut: io.Discard, ConfigDir: b.TempDir(), Getenv: func(name string) string {
+				switch name {
+				case "SIGNOZ_URL":
+					return server.URL
+				case "SIGNOZ_API_KEY":
+					return "synthetic-key"
+				}
+				return ""
+			}}
+			args := []string{"sig", "logs", "search", "--limit", strconv.Itoa(s.rows), "--pages", strconv.Itoa(s.pages), "--start", "2026-01-01T00:00:00Z", "--end", "2026-01-01T00:01:00Z"}
+			b.ReportAllocs()
+			b.SetBytes(int64(total))
+			for b.Loop() {
+				if code := cmd.Run(context.Background(), args, opts); code != 0 {
+					b.Fatalf("CLI exited %d", code)
 				}
 			}
 		})

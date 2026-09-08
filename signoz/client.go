@@ -3,7 +3,8 @@ package signoz
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"mime"
@@ -19,7 +20,7 @@ const maxResponseBytes = 16 << 20
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
-	Status  int    `json:"http_status,omitempty"`
+	Status  int    `json:"http_status,omitzero"`
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -63,25 +64,57 @@ func New(rawURL, key string, timeout time.Duration) (*Client, error) {
 	}}, nil
 }
 
-// request decodes the HTTP envelope directly into the endpoint's wire model.
-// RawMessage is reserved for payloads that must retain their original JSON.
+// Decode directly from the bounded body. Typed fields and jsontext.Values own
+// their storage; nothing returned depends on a decoder's reusable buffer.
 func request[T any](ctx context.Context, c *Client, method, path string, body any, params url.Values) (T, error) {
 	var zero T
-	b, err := c.responseBody(ctx, method, path, body, params)
+	resp, err := c.response(ctx, method, path, body, params)
 	if err != nil {
 		return zero, err
 	}
+	defer resp.Body.Close()
+	tooLarge := &Error{Code: "response_too_large", Message: "API response exceeds 16 MiB; reduce the query range or limit"}
+	if resp.ContentLength > maxResponseBytes {
+		return zero, tooLarge
+	}
+	bodyReader := &responseReader{Reader: resp.Body}
+	limited := &io.LimitedReader{R: bodyReader, N: maxResponseBytes + 1}
 	var envelope struct {
 		Status string `json:"status"`
 		Data   *T     `json:"data"`
 	}
-	if json.Unmarshal(b, &envelope) != nil || envelope.Status != "success" || envelope.Data == nil {
+	decodeErr := json.UnmarshalRead(limited, &envelope)
+	// Finish the bounded read even on a syntax error, so byte limits and body
+	// transport failures retain precedence over sanitized parser diagnostics.
+	if decodeErr != nil {
+		_, _ = io.Copy(io.Discard, limited)
+	}
+	if bodyReader.err != nil {
+		return zero, transportError(ctx, bodyReader.err)
+	}
+	if limited.N == 0 {
+		return zero, tooLarge
+	}
+	if decodeErr != nil || envelope.Status != "success" || envelope.Data == nil {
 		return zero, invalidResponse("API returned an unsuccessful or unexpected JSON response")
 	}
 	return *envelope.Data, nil
 }
 
-func (c *Client) responseBody(ctx context.Context, method, path string, body any, params url.Values) ([]byte, error) {
+type responseReader struct {
+	io.Reader
+	err error
+}
+
+func (r *responseReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && err != io.EOF {
+		r.err = err
+	}
+	return n, err
+}
+
+func (c *Client) response(ctx context.Context, method, path string, body any, params url.Values) (*http.Response, error) {
 	var input io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -110,8 +143,8 @@ func (c *Client) responseBody(ctx context.Context, method, path string, body any
 	if err != nil {
 		return nil, transportError(ctx, err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body.Close()
 		e := &Error{Code: "api", Message: "API request failed", Status: resp.StatusCode}
 		switch {
 		case resp.StatusCode >= 300 && resp.StatusCode < 400:
@@ -131,16 +164,10 @@ func (c *Client) responseBody(ctx context.Context, method, path string, body any
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil || (mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json")) {
+		resp.Body.Close()
 		return nil, &Error{Code: "invalid_response", Message: "expected JSON from the API; the endpoint may be serving a proxy login page"}
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return nil, transportError(ctx, err)
-	}
-	if len(b) > maxResponseBytes {
-		return nil, &Error{Code: "response_too_large", Message: "API response exceeds 16 MiB; reduce the query range or limit"}
-	}
-	return b, nil
+	return resp, nil
 }
 
 func transportError(ctx context.Context, err error) error {
@@ -156,14 +183,14 @@ func transportError(ctx context.Context, err error) error {
 }
 
 func (c *Client) Me(ctx context.Context) (Identity, error) {
-	data, err := request[json.RawMessage](ctx, c, http.MethodGet, "/api/v1/service_accounts/me", nil, nil)
+	data, err := request[jsontext.Value](ctx, c, http.MethodGet, "/api/v1/service_accounts/me", nil, nil)
 	if err != nil {
 		return Identity{}, err
 	}
 	var identity struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(data, &identity); err != nil || identity.ID == "" {
+	if json.Unmarshal(data, &identity) != nil || identity.ID == "" {
 		return Identity{}, &Error{Code: "invalid_response", Message: "API did not return a service-account identity"}
 	}
 	return Identity{ID: identity.ID, Raw: data}, nil

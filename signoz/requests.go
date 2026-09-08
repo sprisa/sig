@@ -2,7 +2,8 @@ package signoz
 
 import (
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"strings"
 	"time"
 )
@@ -155,7 +156,7 @@ func (r FieldValuesRequest) Validate() error {
 // NativeQuery is validated once on input and retains the original JSON numbers
 // and open-ended expressions. Its contents cannot be mutated by callers.
 type NativeQuery struct {
-	payload json.RawMessage
+	payload jsontext.Value
 	kind    string
 }
 
@@ -164,9 +165,12 @@ func ParseQuery(payload []byte) (NativeQuery, error) {
 		return NativeQuery{}, usage("query file exceeds 1 MiB")
 	}
 	var r struct {
-		Start, End     int64
-		RequestType    string
-		CompositeQuery struct{ Queries []json.RawMessage }
+		Start          int64  `json:"start"`
+		End            int64  `json:"end"`
+		RequestType    string `json:"requestType"`
+		CompositeQuery struct {
+			Queries []jsontext.Value `json:"queries"`
+		} `json:"compositeQuery"`
 	}
 	if json.Unmarshal(payload, &r) != nil || len(r.CompositeQuery.Queries) == 0 {
 		return NativeQuery{}, usage("query must be one v5 JSON object with millisecond start/end and compositeQuery.queries")
@@ -179,5 +183,5 @@ func ParseQuery(payload []byte) (NativeQuery, error) {
 	default:
 		return NativeQuery{}, usage("query requestType must be raw, scalar, time_series, or trace")
 	}
-	return NativeQuery{payload: append(json.RawMessage(nil), payload...), kind: r.RequestType}, nil
+	return NativeQuery{payload: append(jsontext.Value(nil), payload...), kind: r.RequestType}, nil
 }
