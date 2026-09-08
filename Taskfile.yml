@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build bin/sig
+    cmds:
+      - go build -trimpath -o bin/sig .
+
+  install:
+    desc: Install sig into GOBIN (or GOPATH/bin)
+    cmds:
+      - go install -trimpath .
+
+  test:
+    desc: Run synthetic unit and HTTP integration tests (no credentials required)
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  test:cover:
+    desc: Report test coverage
+    cmds:
+      - go test -cover ./...
+
+  test:e2e:
+    desc: Run opt-in live smoke tests using SIGNOZ_URL and SIGNOZ_API_KEY (requires OS keychain)
+    cmds:
+      - bash scripts/e2e.sh
+
+  test:api:
+    desc: Compare CLI results with direct API requests (opt-in live test)
+    cmds:
+      - go test -tags=e2e -run '^TestLiveAPIParity$' -count=1 -v ./scripts
+
+  test:repeat:
+    desc: Repeat race-enabled tests with randomized order
+    cmds:
+      - go test -race -shuffle=on -count=3 ./...
+
+  vuln:
+    desc: Scan reachable Go vulnerabilities (requires network access)
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
+  fmt:
+    desc: Format Go source
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Check Go formatting without modifying files
+    cmds:
+      - test -z "$(gofmt -l .)"
+
+  vet:
+    desc: Run Go static checks
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Tidy Go module dependencies
+    cmds:
+      - go mod tidy
+
+  check:
+    desc: Check formatting, static analysis, and race-tested behavior
+    deps: [fmt:check, vet, test:race]

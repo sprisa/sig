@@ -1,0 +1,8 @@
+/bin/
+/sig
+/sig.exe
+/.task/
+/coverage.out
+.env
+.env.*
+!.env.example
