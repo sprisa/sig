@@ -28,6 +28,9 @@ func TestLiveAPIParity(t *testing.T) {
 	}
 	for _, signal := range []string{"logs", "traces"} {
 		t.Run(signal+"-pagination", func(t *testing.T) { checkPagination(t, h, signal) })
+		for _, series := range []bool{false, true} {
+			t.Run(signal+"-aggregation-series-"+strconv.FormatBool(series), func(t *testing.T) { checkAggregation(t, h, signal, series) })
+		}
 	}
 	t.Run("trace-detail", func(t *testing.T) {
 		id := h.traceFixture(t)
@@ -89,6 +92,35 @@ func TestLiveAPIParity(t *testing.T) {
 		got := h.cli(t, h.key, 0, "agent", "schema", "query", "run")
 		requireEqual(t, requireField(t, got.Data, "command", "policy", "effect"), "server_defined")
 	})
+}
+
+func checkAggregation(t *testing.T, h *liveHarness, signal string, series bool) {
+	kind, expression, field, fieldContext := "scalar", "count()", "severity_text", "log"
+	if signal == "traces" {
+		expression, field, fieldContext = "p99(duration_nano)", "name", "span"
+	}
+	spec := map[string]any{"name": "A", "signal": signal, "limit": 5,
+		"aggregations": []any{map[string]string{"expression": expression}},
+		"groupBy":      []any{map[string]string{"name": field, "signal": signal, "fieldContext": fieldContext}},
+		"order":        []any{map[string]any{"key": map[string]string{"name": expression}, "direction": "desc"}},
+	}
+	args := []string{signal, "aggregate", "--aggregation", expression, "--group-by", fieldContext + "." + field, "--limit", "5", "--no-cache"}
+	if series {
+		kind = "time_series"
+		spec["stepInterval"] = 60
+		args = append(args, "--step", "1m")
+	}
+	body := map[string]any{"schemaVersion": "v1", "start": h.start.UnixMilli(), "end": h.end.UnixMilli(), "requestType": kind, "noCache": true,
+		"compositeQuery": map[string]any{"queries": []any{map[string]any{"type": "builder_query", "spec": spec}}}}
+	raw := h.api(t, "POST", "/api/v5/query_range", h.key, body, 200)
+	got := h.cli(t, h.key, 0, append(args, h.bounds()...)...)
+	actual, expected := queryResults(t, got, kind), queryResults(t, raw, kind)
+	// Execution metadata varies per request; compare results and warnings only.
+	if err := compareAggregateResults(actual, expected, series); err != nil {
+		t.Fatal(err)
+	}
+	requireEqual(t, got.Data.(map[string]any)["warning"], raw.Data.(map[string]any)["warning"])
+	requireEqual(t, requireField(t, got.Meta, "completeness"), "unknown")
 }
 
 func checkLogQuery(t *testing.T, h *liveHarness, limit int, where string) {

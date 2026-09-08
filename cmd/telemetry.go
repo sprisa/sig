@@ -15,7 +15,7 @@ func (a *app) signalCommand(signal signoz.Signal) *cli.Command {
 		&cli.IntFlag{Name: "offset", Usage: "Rows to skip, 0-1000000; nonzero requires explicit --start and --end"},
 		&cli.StringFlag{Name: "page-token", Usage: "Resume using meta.next_page_token; do not combine with query flags"},
 	), Action: func(ctx context.Context, c *cli.Command) error { return a.search(ctx, c, signal) }}, commandPolicy{Effect: "read", Authentication: true, QueryLanguage: "signoz_filter", Pagination: "page_token", Result: "array"})
-	group := &cli.Command{Name: string(signal), Usage: "Query and discover " + string(signal), Commands: []*cli.Command{search, a.fieldKeysCommand(signal), a.fieldValuesCommand(signal)}}
+	group := &cli.Command{Name: string(signal), Usage: "Query and discover " + string(signal), Commands: []*cli.Command{search, a.aggregateCommand(signal), a.fieldKeysCommand(signal), a.fieldValuesCommand(signal)}}
 	if signal == signoz.Traces {
 		search.Description = "Returns spans, not distinct or complete traces. Use traces get TRACE_ID for a waterfall."
 		group.Commands = append(group.Commands, operation(&cli.Command{Name: "get", Usage: "Retrieve a trace waterfall, preserving partial-trace indicators", ArgsUsage: "TRACE_ID", Flags: []cli.Flag{

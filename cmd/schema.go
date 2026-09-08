@@ -106,6 +106,8 @@ func (a *app) schema(_ context.Context, cmd *cli.Command) error {
 		"output":      map[string]any{"success": "stdout: {data, meta?}", "failure": "stderr: {error: {code, message, http_status?}}", "help": "plain text", "numeric_precision": "upstream JSON numbers preserved"},
 		"exit_codes":  exitDescriptions(),
 		"guidance": []string{
+			"Read sig agent recipes TOPIC for offline query guidance; topics: workflow, logs, traces, aggregations, metrics.",
+			"Use logs/traces aggregate for statistics, not downloaded search samples. Group limits apply across the whole window; completeness remains unknown.",
 			"Use fields and values to discover queryable attributes; metrics list discovers metric names.",
 			"traces search returns spans; traces get may be partial. Check hasMore and hasMissingSpans.",
 			"Resume search with next_page_token, not next_cursor. Keep the endpoint unchanged. Tokens contain query filters, not credentials.",

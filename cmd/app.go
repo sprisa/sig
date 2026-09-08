@@ -57,7 +57,7 @@ func (a *app) command() *cli.Command {
 		Flags: []cli.Flag{&cli.StringFlag{Name: "context", Usage: "Use a named context instead of the current context"}, &cli.DurationFlag{Name: "timeout", Value: 30 * time.Second, Usage: "HTTP request timeout"}},
 		Commands: []*cli.Command{
 			a.authCommand(), a.contextCommand(), a.signalCommand(signoz.Logs), a.signalCommand(signoz.Traces), a.metricsCommand(), a.servicesCommand(), a.queryCommand(),
-			{Name: "agent", Usage: "Machine-readable command discovery", Commands: []*cli.Command{operation(&cli.Command{Name: "schema", Usage: "Describe commands, flags, safety, and output contracts as JSON", ArgsUsage: "[COMMAND [SUBCOMMAND]]", Action: a.schema}, commandPolicy{Effect: "local_read", Result: "object"})}},
+			{Name: "agent", Usage: "Machine-readable command discovery and offline query recipes", Commands: []*cli.Command{operation(&cli.Command{Name: "schema", Usage: "Describe commands, flags, safety, and output contracts as JSON", ArgsUsage: "[COMMAND [SUBCOMMAND]]", Action: a.schema}, commandPolicy{Effect: "local_read", Result: "object"}), a.recipesCommand()}},
 			operation(&cli.Command{Name: "version", Usage: "Print the CLI version as JSON", Action: func(_ context.Context, c *cli.Command) error {
 				if err := noArgs(c); err != nil {
 					return err
