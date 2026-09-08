@@ -15,31 +15,15 @@ type commandPolicy struct {
 	Result         string `json:"result_type"`
 }
 
-// Safety is explicit operation metadata, not inferred from verbs or HTTP methods.
-var commandPolicies = map[string]commandPolicy{
-	"auth login":             {Effect: "local_write", Authentication: true, Result: "object"},
-	"auth status":            {Effect: "read", Authentication: true, Result: "object"},
-	"auth logout":            {Effect: "local_write", Result: "object"},
-	"config get-contexts":    {Effect: "local_read", Result: "array"},
-	"config current-context": {Effect: "local_read", Result: "object"},
-	"config use-context":     {Effect: "local_write", Result: "object"},
-	"config delete-context":  {Effect: "local_write", Result: "object"},
-	"logs search":            {Effect: "read", Authentication: true, QueryLanguage: "signoz_filter", Pagination: "page_token", Result: "array"},
-	"traces search":          {Effect: "read", Authentication: true, QueryLanguage: "signoz_filter", Pagination: "page_token", Result: "array"},
-	"traces get":             {Effect: "read", Authentication: true, Pagination: "span_window", Result: "object"},
-	"logs fields":            {Effect: "read", Authentication: true, Pagination: "bounded_discovery", Result: "object"},
-	"logs values":            {Effect: "read", Authentication: true, QueryLanguage: "signoz_filter", Pagination: "bounded_discovery", Result: "object"},
-	"traces fields":          {Effect: "read", Authentication: true, Pagination: "bounded_discovery", Result: "object"},
-	"traces values":          {Effect: "read", Authentication: true, QueryLanguage: "signoz_filter", Pagination: "bounded_discovery", Result: "object"},
-	"metrics fields":         {Effect: "read", Authentication: true, Pagination: "bounded_discovery", Result: "object"},
-	"metrics values":         {Effect: "read", Authentication: true, QueryLanguage: "signoz_filter", Pagination: "bounded_discovery", Result: "object"},
-	"metrics list":           {Effect: "read", Authentication: true, Pagination: "bounded_listing", Result: "array"},
-	"metrics query":          {Effect: "read", Authentication: true, QueryLanguage: "promql", Result: "object"},
-	"services list":          {Effect: "read", Authentication: true, Pagination: "bounded_discovery", Result: "object"},
-	"query run":              {Effect: "server_defined", Authentication: true, QueryLanguage: "signoz_v5_json", Result: "object"},
-	"query preview":          {Effect: "read", Authentication: true, QueryLanguage: "signoz_v5_json", Result: "object"},
-	"agent schema":           {Effect: "local_read", Result: "object"},
-	"version":                {Effect: "local_read", Result: "object"},
+const policyKey = "sig.operation"
+
+// A leaf's behavior and discoverable contract are declared together.
+func operation(c *cli.Command, policy commandPolicy) *cli.Command {
+	if c.Metadata == nil {
+		c.Metadata = map[string]any{}
+	}
+	c.Metadata[policyKey] = policy
+	return c
 }
 
 type flagSchema struct {
@@ -69,8 +53,8 @@ func describeCommand(cmd *cli.Command, path []string) (commandSchema, error) {
 	}
 	result := commandSchema{Name: cmd.Name, Path: strings.TrimSpace("sig " + name), Usage: cmd.Usage, Details: cmd.Description, Arguments: cmd.ArgsUsage, Flags: flags}
 	if len(cmd.Commands) == 0 {
-		policy, ok := commandPolicies[name]
-		if !ok {
+		policy, ok := cmd.Metadata[policyKey].(commandPolicy)
+		if !ok || policy.Effect == "" || policy.Result == "" {
 			return commandSchema{}, fail("internal", "agent schema encountered a command without explicit safety metadata")
 		}
 		result.Policy = &policy
@@ -120,7 +104,7 @@ func (a *app) schema(_ context.Context, cmd *cli.Command) error {
 		"schema_version": "1", "cli_version": buildVersion(), "command": description, "global_flags": globals,
 		"environment": []string{"SIGNOZ_URL", "SIGNOZ_API_KEY", "SIG_CONFIG_DIR"},
 		"output":      map[string]any{"success": "stdout: {data, meta?}", "failure": "stderr: {error: {code, message, http_status?}}", "help": "plain text", "numeric_precision": "upstream JSON numbers preserved"},
-		"exit_codes":  map[string]string{"0": "success", "2": "usage", "3": "authentication", "4": "permission", "5": "network/timeout/cancelled", "6": "API/response/output", "7": "configuration/credentials"},
+		"exit_codes":  exitDescriptions(),
 		"guidance": []string{
 			"Use fields and values to discover queryable attributes; metrics list discovers metric names.",
 			"traces search returns spans; traces get may be partial. Check hasMore and hasMissingSpans.",

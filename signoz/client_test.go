@@ -75,8 +75,8 @@ func TestMeAndBasePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != `{"id":"account-1","name":"cli-reader"}` {
-		t.Fatalf("unexpected identity: %s", got)
+	if string(got.Raw) != `{"id":"account-1","name":"cli-reader"}` || got.ID != "account-1" {
+		t.Fatalf("unexpected identity: %s", got.Raw)
 	}
 }
 
@@ -100,14 +100,14 @@ func TestSearchLogsRequestAndPrecision(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"success","data":{"type":"raw","data":{"results":[{"queryName":"A","rows":[{"timestamp":"2026-01-01T00:00:00Z","data":{"duration_nano":9007199254740993}}],"nextCursor":"opaque-cursor"}]},"warning":{"message":"Synthetic partial result"}}}`)
 	})
-	got, err := c.SearchLogs(context.Background(), SearchOptions{Start: time.UnixMilli(1000), End: time.UnixMilli(2000), Limit: 100, Where: "service.name = 'checkout'"})
+	got, err := c.Search(context.Background(), SearchRequest{Window: Window{Start: time.UnixMilli(1000), End: time.UnixMilli(2000)}, Signal: Logs, Limit: 100, Where: "service.name = 'checkout'"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Rows) != 1 || !strings.Contains(string(got.Rows[0]), "9007199254740993") {
 		t.Fatalf("precision lost: %#v", got)
 	}
-	if got.Completeness != "more_available" || got.NextCursor != "opaque-cursor" || !strings.Contains(string(got.Warning), "Synthetic") {
+	if got.NextCursor != "opaque-cursor" || !strings.Contains(string(got.Warning), "Synthetic") {
 		t.Fatalf("metadata lost: %#v", got)
 	}
 }
@@ -121,7 +121,7 @@ func TestLogCompleteness(t *testing.T) {
 		{"null", `null`, "", "", "complete", 100, 0},
 		{"short", `[{}]`, "", "", "complete", 100, 1},
 		{"full", `[{}]`, "", "", "unknown", 1, 1},
-		{"cursor", `[]`, "next", "", "more_available", 100, 0},
+		{"cursor", `[]`, "next", "", "unknown", 100, 0},
 		{"warning", `[]`, "", `,"warning":{"message":"incomplete"}`, "unknown", 100, 0},
 		{"over-limit", `[{},{}]`, "", "", "more_available", 1, 1},
 	} {
@@ -130,7 +130,7 @@ func TestLogCompleteness(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprintf(w, `{"status":"success","data":{"type":"raw","data":{"results":[{"queryName":"A","rows":%s,"nextCursor":%q}]}%s}}`, tt.rows, tt.cursor, tt.warning)
 			})
-			got, err := c.SearchLogs(context.Background(), SearchOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: tt.limit})
+			got, err := c.CollectPages(context.Background(), SearchRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Signal: Logs, Limit: tt.limit}, PageBudget{Pages: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -222,12 +222,12 @@ func TestLogValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, opts := range []SearchOptions{
-		{Start: time.Unix(2, 0), End: time.Unix(1, 0), Limit: 100},
-		{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 0},
-		{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 10001},
+	for _, opts := range []SearchRequest{
+		{Window: Window{Start: time.Unix(2, 0), End: time.Unix(1, 0)}, Signal: Logs, Limit: 100},
+		{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Signal: Logs, Limit: 0},
+		{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Signal: Logs, Limit: 10001},
 	} {
-		_, err := c.SearchLogs(context.Background(), opts)
+		_, err := c.Search(context.Background(), opts)
 		assertCode(t, err, "usage")
 	}
 }
@@ -244,7 +244,7 @@ func TestMalformedLogResponses(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"status":"success","data":%s}`, data)
 		})
-		_, err := c.SearchLogs(context.Background(), SearchOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 100})
+		_, err := c.Search(context.Background(), SearchRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Signal: Logs, Limit: 100})
 		assertCode(t, err, "invalid_response")
 	}
 }

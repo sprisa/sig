@@ -16,8 +16,9 @@ type Context struct {
 }
 
 type Config struct {
-	CurrentContext string             `json:"current_context"`
-	Contexts       map[string]Context `json:"contexts"`
+	CurrentContext     string             `json:"current_context"`
+	Contexts           map[string]Context `json:"contexts"`
+	PendingCredentials []string           `json:"pending_credentials,omitempty"`
 }
 
 var contextName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
@@ -69,6 +70,18 @@ func (c *Config) validate() error {
 			return errors.New("invalid context configuration")
 		}
 	}
+	seen := map[string]bool{}
+	for _, id := range c.PendingCredentials {
+		if id == "" || seen[id] {
+			return errors.New("invalid pending credential references")
+		}
+		seen[id] = true
+		for _, ctx := range c.Contexts {
+			if ctx.Credential == id {
+				return errors.New("pending credential is still active")
+			}
+		}
+	}
 	return nil
 }
 
@@ -80,6 +93,9 @@ func Save(dir string, c *Config) error {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(b)+1 > 1<<20 {
+		return errors.New("configuration exceeds 1 MiB")
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err

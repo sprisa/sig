@@ -37,7 +37,7 @@ func TestTraceSearchRequest(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"success","data":{"type":"raw","data":{"results":[{"queryName":"A","rows":[]}]}}}`)
 	})
-	_, err := c.SearchTraces(context.Background(), SearchOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 2, Offset: 4})
+	_, err := c.Search(context.Background(), SearchRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Signal: Traces, Limit: 2, Offset: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,15 +59,15 @@ func TestTraceDetailRequest(t *testing.T) {
 		io.WriteString(w, `{"status":"success","data":{"spans":[],"hasMore":true,"hasMissingSpans":true,"totalSpansCount":9007199254740993}}`)
 	})
 	expanded := []string{"FEDCBA9876543210"}
-	data, err := c.Trace(context.Background(), "0123456789ABCDEF0123456789ABCDEF", "0123456789ABCDEF", expanded)
+	data, err := c.Trace(context.Background(), TraceRequest{ID: "0123456789ABCDEF0123456789ABCDEF", SelectedSpan: "0123456789ABCDEF", ExpandedSpans: expanded})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "9007199254740993") || expanded[0] != "FEDCBA9876543210" {
+	if !strings.Contains(string(data.Raw), "9007199254740993") || expanded[0] != "FEDCBA9876543210" || data.Completeness() != "partial" {
 		t.Error("trace precision or caller input changed")
 	}
 	for _, id := range []string{"../auth", strings.Repeat("0", 32), "short", strings.Repeat("z", 32)} {
-		_, err := c.Trace(context.Background(), id, "", nil)
+		_, err := c.Trace(context.Background(), TraceRequest{ID: id})
 		assertCode(t, err, "usage")
 	}
 }
@@ -98,15 +98,15 @@ func TestPromQLRequest(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"success","data":{"type":"time_series","data":{"results":[{"queryName":"A","aggregations":[]}]},"warning":{"message":"synthetic warning"}}}`)
 	})
-	data, err := c.MetricsQuery(context.Background(), "vector(1)", time.Unix(1, 0), time.Unix(121, 0), time.Minute, true)
-	if err != nil || !strings.Contains(string(data), "synthetic warning") {
+	data, err := c.MetricsQuery(context.Background(), MetricsQueryRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(121, 0)}, Expression: "vector(1)", Step: time.Minute, NoCache: true})
+	if err != nil || !strings.Contains(string(data.Raw), "synthetic warning") {
 		t.Fatalf("PromQL result: %v", err)
 	}
 	for _, step := range []time.Duration{0, -time.Second, time.Millisecond, 1500 * time.Millisecond} {
-		_, err := c.MetricsQuery(context.Background(), "vector(1)", time.Unix(1, 0), time.Unix(121, 0), step, false)
+		_, err := c.MetricsQuery(context.Background(), MetricsQueryRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(121, 0)}, Expression: "vector(1)", Step: step})
 		assertCode(t, err, "usage")
 	}
-	_, err = c.MetricsQuery(context.Background(), "vector(1)", time.Unix(1, 0), time.Unix(12000, 0), time.Second, false)
+	_, err = c.MetricsQuery(context.Background(), MetricsQueryRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(12000, 0)}, Expression: "vector(1)", Step: time.Second})
 	assertCode(t, err, "usage")
 }
 
@@ -119,8 +119,8 @@ func TestDiscoveryQueryEncoding(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"success","data":{"values":{"numberValues":[9007199254740993]},"complete":false}}`)
 	})
-	data, err := c.Fields(context.Background(), "metrics", true, DiscoveryOptions{Start: time.Unix(1, 0), End: time.Unix(2, 0), Limit: 50, Name: "service.name", MetricName: "provider/requests.total", Search: "api & jobs", Where: "service.name = 'checkout'"})
-	if err != nil || !strings.Contains(string(data), "9007199254740993") {
+	data, err := c.FieldValues(context.Background(), FieldValuesRequest{FieldKeysRequest: FieldKeysRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Signal: Metrics, Limit: 50, MetricName: "provider/requests.total", Search: "api & jobs"}, Name: "service.name", Where: "service.name = 'checkout'"})
+	if err != nil || !strings.Contains(string(data.Raw), "9007199254740993") {
 		t.Fatalf("discovery failed: %v", err)
 	}
 }
@@ -133,7 +133,7 @@ func TestMetricsListRequest(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"status":"success","data":{"metrics":[]}}`)
 	})
-	_, err := c.MetricsList(context.Background(), time.Unix(1, 0), time.Unix(2, 0), 5, "cpu & memory")
+	_, err := c.MetricsList(context.Background(), MetricsListRequest{Window: Window{Start: time.Unix(1, 0), End: time.Unix(2, 0)}, Limit: 5, Search: "cpu & memory"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,16 +154,30 @@ func TestNativeQueryAndPreview(t *testing.T) {
 				t.Error("incorrect run endpoint")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			io.WriteString(w, `{"status":"success","data":{"compositeQuery":{"A":{"valid":false,"error":{"message":"synthetic error"}}}}}`)
+			if preview {
+				io.WriteString(w, `{"status":"success","data":{"compositeQuery":{"A":{"valid":false,"error":{"message":"synthetic error"}}}}}`)
+			} else {
+				io.WriteString(w, `{"status":"success","data":{"type":"scalar","data":{"results":[{"queryName":"A","columns":[],"data":[[9007199254740993]]}]}}}`)
+			}
 		})
-		data, err := c.Query(context.Background(), payload, preview, false)
-		if err != nil || !strings.Contains(string(data), `"valid":false`) {
-			t.Fatalf("preview verdict lost: %v", err)
+		query, err := ParseQuery(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if preview {
+			data, err := c.Preview(context.Background(), query, false)
+			if err != nil || data.Queries["A"].Valid || !strings.Contains(string(data.Raw), `"valid":false`) {
+				t.Fatalf("preview verdict lost: %v", err)
+			}
+		} else {
+			data, err := c.Query(context.Background(), query)
+			if err != nil || data.Type != "scalar" || !strings.Contains(string(data.Raw), "9007199254740993") {
+				t.Fatalf("scalar result lost: %v", err)
+			}
 		}
 	}
-	c, _ := New("https://signoz.example.com", "synthetic-key", time.Second)
 	for _, payload := range []string{`[]`, `{}`, `null`, `{"start":0,"end":2000}`, `{"start":1000,"end":2000,"requestType":"raw_stream","compositeQuery":{"queries":[{}]}}`, strings.Repeat(" ", MaxQueryBytes+1)} {
-		_, err := c.Query(context.Background(), json.RawMessage(payload), false, false)
+		_, err := ParseQuery([]byte(payload))
 		assertCode(t, err, "usage")
 	}
 }

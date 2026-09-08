@@ -2,24 +2,33 @@ package cmd
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/sprisa/sig/config"
 	"github.com/sprisa/sig/signoz"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 )
 
+func (a *app) authCommand() *cli.Command {
+	return &cli.Command{Name: "auth", Usage: "Manage local service-account credentials", Commands: []*cli.Command{
+		operation(&cli.Command{Name: "login", Usage: "Validate and securely store a service-account key", Flags: []cli.Flag{&cli.StringFlag{Name: "url", Usage: "Reachable SigNoz base URL"}, &cli.BoolFlag{Name: "key-stdin", Usage: "Read the API key from stdin instead of prompting"}}, Action: a.login}, commandPolicy{Effect: "local_write", Authentication: true, Result: "object"}),
+		operation(&cli.Command{Name: "status", Usage: "Validate the effective credential and report identity", Action: a.status}, commandPolicy{Effect: "read", Authentication: true, Result: "object"}),
+		operation(&cli.Command{Name: "logout", Usage: "Remove the stored credential, without revoking the server key", Action: a.logout}, commandPolicy{Effect: "local_write", Result: "object"}),
+	}}
+}
+
 func (a *app) login(ctx context.Context, cmd *cli.Command) error {
 	if err := noArgs(cmd); err != nil {
 		return err
 	}
-	dir, cfg, err := a.load()
+	store, err := a.store()
+	if err != nil {
+		return err
+	}
+	cfg, err := store.Load()
 	if err != nil {
 		return err
 	}
@@ -75,37 +84,21 @@ func (a *app) login(ctx context.Context, cmd *cli.Command) error {
 	if _, err := client.Me(ctx); err != nil {
 		return err
 	}
-	idBytes := make([]byte, 16)
-	if _, err := rand.Read(idBytes); err != nil {
-		return fail("credentials", "could not generate credential identifier")
-	}
-	id := hex.EncodeToString(idBytes)
-	if err := a.Credentials.Set(id, key); err != nil {
-		return fail("credentials", "cannot store key in the OS keychain; use SIGNOZ_URL and SIGNOZ_API_KEY without login for headless operation")
-	}
-	if len(cfg.Contexts) == 0 {
-		cfg.CurrentContext = name
-	}
-	cfg.Contexts[name] = config.Context{URL: endpoint, Credential: id}
-	if err := save(dir, cfg); err != nil {
-		if cleanupErr := a.Credentials.Delete(id); cleanupErr != nil {
-			return fail("credentials", "configuration save failed and the new keychain entry could not be removed")
-		}
+	if err := store.Replace(ctx, name, endpoint, key); err != nil {
 		return err
-	}
-	if previous.Credential != "" {
-		if err := a.Credentials.Delete(previous.Credential); err != nil {
-			return fail("credentials", "login saved, but the previous keychain entry could not be removed")
-		}
 	}
 	return a.emit(map[string]any{"context": name, "url": endpoint, "authenticated": true, "credential_source": "keychain"}, nil)
 }
 
-func (a *app) logout(_ context.Context, cmd *cli.Command) error {
+func (a *app) logout(ctx context.Context, cmd *cli.Command) error {
 	if err := noArgs(cmd); err != nil {
 		return err
 	}
-	dir, cfg, err := a.load()
+	store, err := a.store()
+	if err != nil {
+		return err
+	}
+	cfg, err := store.Load()
 	if err != nil {
 		return err
 	}
@@ -113,16 +106,23 @@ func (a *app) logout(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	c, exists := cfg.Contexts[name]
-	if exists && c.Credential != "" {
-		if err := a.Credentials.Delete(c.Credential); err != nil {
-			return fail("credentials", "cannot remove credential from the OS keychain")
-		}
-		c.Credential = ""
-		cfg.Contexts[name] = c
-		if err := save(dir, cfg); err != nil {
-			return err
-		}
+	if err := store.Logout(ctx, name); err != nil {
+		return err
 	}
 	return a.emit(map[string]any{"context": name, "credential_removed": true, "environment_key_present": a.Getenv("SIGNOZ_API_KEY") != "", "server_key_revoked": false}, nil)
+}
+
+func (a *app) status(ctx context.Context, c *cli.Command) error {
+	if err := noArgs(c); err != nil {
+		return err
+	}
+	conn, err := a.connect(c)
+	if err != nil {
+		return err
+	}
+	identity, err := conn.Client.Me(ctx)
+	if err != nil {
+		return err
+	}
+	return a.emit(map[string]any{"context": conn.Context, "url": conn.Endpoint, "authenticated": true, "credential_source": conn.CredentialSource, "identity": identity.Raw}, nil)
 }

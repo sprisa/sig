@@ -18,10 +18,11 @@ import (
 )
 
 type memoryCredentials struct {
-	keys  map[string]string
-	fail  bool
-	reads int
-	onSet func()
+	keys     map[string]string
+	fail     bool
+	reads    int
+	onSet    func()
+	onDelete func(string) error
 }
 
 func (m *memoryCredentials) Get(id string) (string, error) {
@@ -48,11 +49,46 @@ func (m *memoryCredentials) Set(id, key string) error {
 }
 
 func (m *memoryCredentials) Delete(id string) error {
+	if m.onDelete != nil {
+		if err := m.onDelete(id); err != nil {
+			return err
+		}
+	}
 	if m.fail {
 		return errors.New("synthetic keychain failure")
 	}
 	delete(m.keys, id)
 	return nil
+}
+
+func TestRotationFailureKeepsCleanupReference(t *testing.T) {
+	h := newHarness(t)
+	s := identityServer(t)
+	h.run(t, "synthetic-api-key", 0, "auth", "login", "--url", s.URL, "--key-stdin")
+	cfg, err := config.Load(h.opts.ConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := cfg.Contexts["default"].Credential
+	h.keys.onDelete = func(id string) error {
+		if id == old {
+			return errors.New("synthetic delete failure")
+		}
+		return nil
+	}
+	h.run(t, "synthetic-api-key", 7, "auth", "login", "--key-stdin")
+	data, err := os.ReadFile(filepath.Join(h.opts.ConfigDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(old)) {
+		t.Fatal("failed cleanup lost the old credential reference")
+	}
+	h.keys.onDelete = nil
+	h.run(t, "", 0, "auth", "logout")
+	if len(h.keys.keys) != 0 {
+		t.Fatal("retry did not clean up all credentials")
+	}
 }
 
 type harness struct {
@@ -238,8 +274,12 @@ func TestLoginFailuresPreserveCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(original, after) || len(h.keys.keys) != 1 {
-		t.Fatal("failed login changed existing credentials")
+	var beforeConfig, afterConfig config.Config
+	if json.Unmarshal(original, &beforeConfig) != nil || json.Unmarshal(after, &afterConfig) != nil {
+		t.Fatal("invalid configuration")
+	}
+	if beforeConfig.Contexts["default"] != afterConfig.Contexts["default"] || len(h.keys.keys) != 1 || len(afterConfig.PendingCredentials) != 1 {
+		t.Fatal("failed login did not preserve the active credential and pending cleanup")
 	}
 	h.keys.fail = false
 	h.run(t, "synthetic-api-key", 0, "auth", "login", "--key-stdin")
@@ -312,6 +352,9 @@ func TestLoginSaveFailureRollsBackNewCredential(t *testing.T) {
 	s := identityServer(t)
 	h.keys.onSet = func() {
 		// Block atomic replacement after login has validated and stored its key.
+		if err := os.Remove(filepath.Join(h.opts.ConfigDir, "config.json")); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.MkdirAll(filepath.Join(h.opts.ConfigDir, "config.json"), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -322,7 +365,7 @@ func TestLoginSaveFailureRollsBackNewCredential(t *testing.T) {
 	}
 }
 
-func TestCredentialRemovalFailurePreservesContext(t *testing.T) {
+func TestCredentialRemovalFailurePreservesCleanupReference(t *testing.T) {
 	for _, command := range [][]string{{"auth", "logout"}, {"config", "delete-context", "default"}} {
 		h := newHarness(t)
 		s := identityServer(t)
@@ -337,8 +380,17 @@ func TestCredentialRemovalFailurePreservesContext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(before, after) || len(h.keys.keys) != 1 {
-			t.Fatal("failed credential deletion changed the context")
+		var initial, failed config.Config
+		if json.Unmarshal(before, &initial) != nil || json.Unmarshal(after, &failed) != nil {
+			t.Fatal("invalid configuration")
+		}
+		if len(failed.PendingCredentials) != 1 || failed.PendingCredentials[0] != initial.Contexts["default"].Credential || len(h.keys.keys) != 1 {
+			t.Fatal("failed deletion lost cleanup state")
+		}
+		h.keys.fail = false
+		h.run(t, "", 0, "auth", "logout")
+		if len(h.keys.keys) != 0 {
+			t.Fatal("pending deletion was not retried")
 		}
 	}
 }

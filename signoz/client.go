@@ -144,106 +144,16 @@ func transportError(ctx context.Context, err error) error {
 	return &Error{Code: "network", Message: "could not reach the API; check network access, the URL, and TLS trust"}
 }
 
-func (c *Client) Me(ctx context.Context) (json.RawMessage, error) {
+func (c *Client) Me(ctx context.Context) (Identity, error) {
 	data, err := c.request(ctx, http.MethodGet, "/api/v1/service_accounts/me", nil, nil)
 	if err != nil {
-		return nil, err
+		return Identity{}, err
 	}
 	var identity struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(data, &identity); err != nil || identity.ID == "" {
-		return nil, &Error{Code: "invalid_response", Message: "API did not return a service-account identity"}
+		return Identity{}, &Error{Code: "invalid_response", Message: "API did not return a service-account identity"}
 	}
-	return data, nil
-}
-
-type SearchOptions struct {
-	Start, End time.Time
-	Limit      int
-	Where      string
-	Offset     int
-}
-
-type SearchResult struct {
-	Rows         []json.RawMessage
-	NextCursor   string
-	Warning      json.RawMessage
-	Completeness string
-}
-
-func (c *Client) SearchLogs(ctx context.Context, opts SearchOptions) (SearchResult, error) {
-	return c.search(ctx, "logs", opts)
-}
-
-func (c *Client) SearchTraces(ctx context.Context, opts SearchOptions) (SearchResult, error) {
-	return c.search(ctx, "traces", opts)
-}
-
-func (c *Client) search(ctx context.Context, signal string, opts SearchOptions) (SearchResult, error) {
-	if err := ValidateWindow(opts.Start, opts.End); err != nil {
-		return SearchResult{}, err
-	}
-	if opts.Limit < 1 || opts.Limit > 10000 || opts.Offset < 0 || opts.Offset > 1000000 {
-		return SearchResult{}, &Error{Code: "usage", Message: "search requires a limit between 1 and 10000 and an offset between 0 and 1000000"}
-	}
-	order := []any{map[string]any{"key": map[string]string{"name": "timestamp"}, "direction": "desc"}}
-	ties := []string{"id"}
-	if signal == "traces" {
-		ties = []string{"trace_id", "span_id"}
-	}
-	for _, name := range ties {
-		order = append(order, map[string]any{"key": map[string]string{"name": name}, "direction": "desc"})
-	}
-	spec := map[string]any{
-		"name": "A", "signal": signal, "limit": opts.Limit, "offset": opts.Offset, "order": order,
-	}
-	if opts.Where != "" {
-		spec["filter"] = map[string]string{"expression": opts.Where}
-	}
-	data, err := c.request(ctx, http.MethodPost, "/api/v5/query_range", map[string]any{
-		"schemaVersion": "v1", "start": opts.Start.UnixMilli(), "end": opts.End.UnixMilli(), "requestType": "raw",
-		"compositeQuery": map[string]any{"queries": []any{map[string]any{"type": "builder_query", "spec": spec}}},
-	}, nil)
-	if err != nil {
-		return SearchResult{}, err
-	}
-	var response struct {
-		Type string `json:"type"`
-		Data struct {
-			Results []struct {
-				QueryName  string          `json:"queryName"`
-				Rows       json.RawMessage `json:"rows"`
-				NextCursor string          `json:"nextCursor"`
-			} `json:"results"`
-		} `json:"data"`
-		Warning json.RawMessage `json:"warning"`
-	}
-	if err := json.Unmarshal(data, &response); err != nil || response.Type != "raw" || len(response.Data.Results) != 1 || response.Data.Results[0].QueryName != "A" {
-		return SearchResult{}, &Error{Code: "invalid_response", Message: "unexpected search response; check SigNoz API compatibility"}
-	}
-	raw := response.Data.Results[0]
-	var rows []json.RawMessage
-	if err := json.Unmarshal(raw.Rows, &rows); err != nil {
-		return SearchResult{}, &Error{Code: "invalid_response", Message: "API did not return a row array"}
-	}
-	if rows == nil {
-		rows = []json.RawMessage{}
-	}
-	completeness := "complete"
-	if len(rows) >= opts.Limit {
-		completeness = "unknown"
-	}
-	if len(response.Warning) > 0 && string(response.Warning) != "null" {
-		completeness = "unknown"
-	}
-	if raw.NextCursor != "" {
-		completeness = "more_available"
-	}
-	if len(rows) > opts.Limit {
-		rows = rows[:opts.Limit]
-		raw.NextCursor = "" // The server cursor would skip rows discarded locally.
-		completeness = "more_available"
-	}
-	return SearchResult{Rows: rows, NextCursor: raw.NextCursor, Warning: response.Warning, Completeness: completeness}, nil
+	return Identity{ID: identity.ID, Raw: data}, nil
 }

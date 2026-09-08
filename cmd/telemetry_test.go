@@ -171,6 +171,8 @@ func TestNewCommandsEndToEnd(t *testing.T) {
 			}
 			if body.RequestType == "raw" {
 				io.WriteString(w, `{"status":"success","data":{"type":"raw","data":{"results":[{"queryName":"A","rows":[]}]}}}`)
+			} else if body.RequestType == "scalar" {
+				io.WriteString(w, `{"status":"success","data":{"type":"scalar","data":{"results":[{"queryName":"A","columns":[],"data":[[1]]}]}}}`)
 			} else {
 				io.WriteString(w, `{"status":"success","data":{"type":"time_series","data":{"results":[]},"warning":{"message":"synthetic warning"}}}`)
 			}
@@ -253,8 +255,15 @@ func TestAgentSchemaCoverageAndPrivacy(t *testing.T) {
 		}
 	}
 	walk(document.Data.Command)
-	if count != len(commandPolicies) {
-		t.Fatalf("described %d leaves, policies %d", count, len(commandPolicies))
+	expected := 0
+	_ = (&app{h.opts}).command().Walk(func(c *cli.Command) error {
+		if len(c.Commands) == 0 {
+			expected++
+		}
+		return nil
+	})
+	if count != expected {
+		t.Fatalf("described %d leaves, registered %d", count, expected)
 	}
 	got = h.run(t, "", 0, "agent", "schema", "query", "run")
 	if !strings.Contains(got, `"effect":"server_defined"`) || !strings.Contains(got, `"required":true`) {

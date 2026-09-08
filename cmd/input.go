@@ -1,55 +1,70 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"io"
 	"os"
-	"runtime"
-	"time"
-
-	"github.com/muesli/cancelreader"
-	"golang.org/x/term"
+	"strings"
 )
+
+type inputSource struct {
+	reader    io.Reader
+	interrupt func()
+	release   func()
+}
+
+// File and memory inputs are finite reads. Streams need a known interrupt
+// mechanism: arbitrary io.Reader implementations are rejected, not disguised as
+// cancellable readers or read by goroutines that can be abandoned.
+func openInput(input io.Reader) (inputSource, error) {
+	switch r := input.(type) {
+	case *strings.Reader, *bytes.Reader, *bytes.Buffer:
+		return inputSource{reader: r}, nil
+	case *io.PipeReader:
+		return inputSource{reader: r, interrupt: func() { _ = r.CloseWithError(context.Canceled) }}, nil
+	case *os.File:
+		info, err := r.Stat()
+		if err != nil {
+			return inputSource{}, fail("usage", "cannot inspect input")
+		}
+		if info.Mode().IsRegular() {
+			return inputSource{reader: r}, nil
+		}
+		return openFileStream(r)
+	default:
+		return inputSource{}, fail("usage", "unsupported input reader; use a regular file, an in-memory reader, or a cancellable stream")
+	}
+}
+
+// stop waits for an in-flight callback before the caller releases its resource.
+func interruptOnCancel(ctx context.Context, interrupt func()) func() {
+	if interrupt == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { interrupt(); close(done) })
+	return func() {
+		if !stop() {
+			<-done
+		}
+	}
+}
 
 func readBoundedInput(ctx context.Context, input io.Reader, limit int64) ([]byte, error) {
 	if ctx.Err() != nil {
 		return nil, fail("cancelled", "input cancelled")
 	}
-	var cancel, release func()
-	if file, ok := input.(*os.File); ok && file.SetReadDeadline(time.Time{}) == nil {
-		cancel = func() { _ = file.SetReadDeadline(time.Now()) }
-		release = func() { _ = file.SetReadDeadline(time.Time{}) }
-	} else {
-		if file, ok := input.(*os.File); ok {
-			info, err := file.Stat()
-			if err != nil {
-				return nil, fail("usage", "cannot inspect input")
-			}
-			// Regular files cannot be registered with epoll. Windows' console
-			// cancellation backend also cannot read redirected non-console input.
-			if info.Mode().IsRegular() || ((runtime.GOOS == "windows" || info.Mode()&os.ModeCharDevice != 0) && !term.IsTerminal(int(file.Fd()))) {
-				input = struct{ io.Reader }{input}
-			}
-		}
-		reader, err := cancelreader.NewReader(input)
-		if err != nil {
-			return nil, fail("usage", "cannot initialize input reader")
-		}
-		input = reader
-		cancel = func() { reader.Cancel() }
-		release = func() { _ = reader.Close() }
+	source, err := openInput(input)
+	if err != nil {
+		return nil, err
 	}
-	defer release()
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() { cancel(); close(done) })
-	defer func() {
-		if !stop() {
-			<-done
-		}
-	}()
-	data, err := io.ReadAll(io.LimitReader(input, limit+1))
-	if ctx.Err() != nil || errors.Is(err, cancelreader.ErrCanceled) {
+	if source.release != nil {
+		defer source.release()
+	}
+	defer interruptOnCancel(ctx, source.interrupt)()
+	data, err := io.ReadAll(io.LimitReader(source.reader, limit+1))
+	if ctx.Err() != nil {
 		return nil, fail("cancelled", "input cancelled")
 	}
 	if err != nil {

@@ -34,16 +34,7 @@ func readTerminalKey(ctx context.Context, input *os.File, output io.Writer) (key
 	}()
 
 	// Cancel reads on external signals as well as handling Ctrl-C typed in raw mode.
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
-		reader.Cancel()
-		close(done)
-	})
-	defer func() {
-		if !stop() {
-			<-done
-		}
-	}()
+	defer interruptOnCancel(ctx, func() { reader.Cancel() })()
 	terminal := term.NewTerminal(struct {
 		io.Reader
 		io.Writer

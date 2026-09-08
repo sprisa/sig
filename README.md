@@ -106,8 +106,19 @@ Configuration lives in `sig/config.json` under Go's `os.UserConfigDir()`:
 | Windows | `%AppData%\sig\config.json` |
 
 Override the directory with `SIG_CONFIG_DIR`. Configuration writes are atomic;
-new directories and files use owner-only permissions on Unix. Context management
-is intended for one writer at a time, not concurrent configuration updates.
+new directories and files use owner-only permissions on Unix. Context and
+credential mutations take an OS-backed `config.lock`, reload the latest snapshot,
+and wait at most five seconds for a competing writer. Reads never take that lock.
+
+The optional `pending_credentials` list is a cleanup journal of opaque keychain
+references, never API keys. Replacement records a new reference before storing a
+key, and keeps detached references until deletion succeeds. After an interrupted
+operation or keychain failure, the next mutation retries pending cleanup. A
+cleanup error can mean the context change was already saved; inspect `auth status`
+or `config get-contexts`, repair keychain access, and retry. This is a recoverable
+two-store protocol, not a claim that the filesystem and keychain share a transaction.
+Older configuration files without this optional field remain readable. Do not
+downgrade to a version that cannot read the journal while cleanup is pending.
 
 Resolution rules:
 
@@ -371,6 +382,21 @@ their tools are unavailable. Native Windows terminal behavior needs separate
 operator verification. Live compatibility and real keychain integration require
 the opt-in checks below.
 
+The `signoz` package owns typed requests, invariant validation, fixed response
+envelopes, and page collection. Raw JSON is retained for arbitrary telemetry and
+native query output so unknown fields and numeric precision survive. The `cmd`
+package binds flags, resolves a named connection, encodes continuation tokens, and
+renders results. Command safety metadata is attached to the command definition,
+not maintained in a second path registry. `config.Store` owns serialized mutations
+and cleanup recovery; `config.Save` is only the low-level snapshot writer.
+
+Input handling distinguishes finite files/in-memory buffers from interruptible
+streams. Injected `io.PipeReader` streams are closed on cancellation; OS streams
+use deadlines or platform cancellation. Unsupported reader implementations fail
+explicitly rather than starting a background read that could be abandoned. Regular
+file reads remain bounded but cannot guarantee interruption of a blocked filesystem
+call. Native console interruption still depends on the OS cancellation backend.
+
 CI is configured to run formatting, vet, and race-enabled tests on Linux, macOS, and Windows. It
 does not have live credentials or run the opt-in suites. Versioned module installs
 report the module version; local builds report `dev` unless stamped through the
@@ -431,6 +457,11 @@ does not access the keychain, and does not print response contents. The `e2e` Go
 build tag keeps these tests out of ordinary test runs, and caching is disabled for
 the live task. Choose a stable historical window so separate requests see the same
 data; the unfiltered or `SIG_E2E_WHERE` comparisons must not be empty.
+
+Live scenarios load their own trace/metric prerequisites and can be selected
+independently with Go's `-run` filter. Missing required JSON fields fail the test;
+they are not treated as equal missing values. Trace/metric fixture absence is an
+explicit skip, not evidence of positive data coverage.
 
 Never commit deployment URLs, credentials, real telemetry, or captured production
 responses. Examples and fixtures must use placeholder endpoints and synthetic data.

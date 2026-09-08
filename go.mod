@@ -3,6 +3,7 @@ module github.com/sprisa/sig
 go 1.27.1
 
 require (
+	github.com/gofrs/flock v0.12.1
 	github.com/muesli/cancelreader v0.2.2
 	github.com/urfave/cli/v3 v3.11.0
 	github.com/zalando/go-keyring v0.2.8
