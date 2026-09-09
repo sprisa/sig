@@ -1,568 +1,205 @@
-# sig
+<div align="center">
+  <h1>sig</h1>
+  <p><strong>A SigNoz CLI built for AI agents.</strong></p>
+  <p>Query logs, traces, and metrics with structured JSON output.</p>
+  <p>
+    <a href="#quick-start"><strong>Quick start</strong></a> ·
+    <a href="#everyday-queries"><strong>Usage</strong></a> ·
+    <a href="#ai-agents"><strong>AI agents</strong></a> ·
+    <a href="#learn-more"><strong>Documentation</strong></a>
+  </p>
+  <p>
+    <a href="https://github.com/sprisa/sig/actions/workflows/ci.yml"><img src="https://github.com/sprisa/sig/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MPL%202.0-blue" alt="License: MPL 2.0"></a>
+  </p>
+</div>
 
-A JSON-first SigNoz CLI for humans, scripts, and AI agents. Built with Go and
-[urfave/cli v3](https://cli.urfave.org/v3/).
+**sig** is an independent CLI for [SigNoz](https://signoz.io). Find the logs behind
+an error, inspect a slow trace, or query a metric without leaving your workflow.
+It connects directly to your SigNoz API and returns JSON that works equally well
+in a shell pipeline or an agent's tool call.
 
-The v1 command surface covers service-account authentication, contexts, paginated
-log and span search, trace retrieval, PromQL, telemetry discovery, native JSON
-queries, and machine-readable command discovery. The client targets SigNoz
-v0.132.0's APIs; API compatibility with other releases must be verified separately.
+- **Investigate across signals.** Search logs and spans, fetch trace waterfalls,
+  calculate statistics, and run PromQL.
+- **Discover as you go.** Find field names, observed values, and available metrics
+  before building a query.
+- **Bring your agent.** Machine-readable commands and offline query recipes are
+  built in. No MCP server is needed.
 
 ## Install
 
-Use the Go version specified in `go.mod`. From a checkout:
+### CLI
 
 ```sh
-go install .
+go install github.com/sprisa/sig@latest
 ```
 
-Or build a local binary:
+Requires [Go](https://go.dev/dl/) 1.27.1 or newer. Make sure your Go binary directory
+is on `PATH`, then check the installation:
 
 ```sh
-go build -o bin/sig .
+sig version
 ```
 
-## Quick Start
+[Installation help](docs/CONFIGURATION.md#installation) ·
+[Build from source](docs/CONTRIBUTING.md#get-started)
 
-Provide a reachable SigNoz URL and a key generated for a SigNoz service account.
-`sig` does not provision networking, start tunnels, or authenticate to an external
-OAuth proxy. If your endpoint has another access layer, arrange access outside
-the CLI. HTTPS is required except for HTTP endpoints on localhost or a loopback IP.
+### Agent skill
+
+Install the skill for your AI agent with [skills](https://skills.sh/docs/cli)
+(requires Node.js and `npx`):
 
 ```sh
-# Prompts for the key without echoing it. Creates the default context.
+npx skills add sprisa/sig
+```
+
+The skill includes CLI installation instructions, so you can start here even if
+you haven't installed `sig` yet. It also teaches the investigation workflow and
+when to load the bundled query recipes.
+
+## Quick start
+
+You'll need your SigNoz URL and a
+[service-account API key](https://signoz.io/docs/manage/administrator-guide/iam/service-accounts/).
+Replace the example URL with your instance:
+
+```sh
 sig auth login --url https://signoz.example.com
-
-sig auth status
-sig logs search --since 15m
-sig logs search --where "service.name = 'checkout' AND severity_text = 'ERROR'" --since 1h
-```
-
-Login checks `GET /api/v1/service_accounts/me` before saving credentials. An
-identity check does not prove permission to query logs. Give the account the
-appropriate SigNoz role; the CLI does not grant or modify server permissions.
-
-## Credentials
-
-Persistent credentials use the OS keychain: macOS Keychain, Windows Credential
-Manager, or Linux Secret Service. There is no plaintext fallback. Linux desktop
-storage requires an available, unlocked Secret Service provider and D-Bus session.
-
-For headless use, inject `SIGNOZ_URL` and `SIGNOZ_API_KEY` through your secret
-manager or execution environment, then run commands directly without login:
-
-```sh
-# SIGNOZ_URL and SIGNOZ_API_KEY are already injected by the environment.
-sig auth status
-sig logs search
-```
-
-This does not write configuration or access the keychain. Environment variables
-can be inherited by child processes; handle them as secrets.
-
-`auth login --key-stdin` supports importing a key from a pipe into the keychain.
-Noninteractive login requires that flag or `SIGNOZ_API_KEY`. Keys are never
-accepted through a `--api-key` argument. Only explicit interactive login prompts;
-query commands never prompt or open a browser.
-
-Interactive login restores terminal settings on success or cancellation. Ctrl-C,
-Ctrl-D on an empty line, SIGINT, and SIGTERM cancel the key prompt with exit code 5.
-
-```sh
-sig auth logout
-```
-
-Logout removes the selected context's stored key, not its URL, and does not revoke
-the server-side key. An injected `SIGNOZ_API_KEY` still works after local logout.
-Revoke keys in SigNoz when needed.
-
-### Reverse-Proxy Headers (MCP-Compatible Format)
-
-If SigNoz is behind an authenticating reverse proxy, inject
-`SIGNOZ_CUSTOM_HEADERS` alongside the API key or use it with a stored key:
-
-```sh
-# Syntax example only; inject real values through your secret manager/environment.
-export SIGNOZ_CUSTOM_HEADERS='CF-Access-Client-Id:example.access,CF-Access-Client-Secret:<proxy-secret>'
 sig auth status
 sig logs search --since 15m
 ```
 
-This uses the official MCP server's `Name:Value,Name:Value` format. Entries split
-at commas and at the first colon in each entry, with surrounding whitespace
-trimmed. Colons within values are preserved. Empty values are allowed. Commas
-inside values are not representable: the format has no quoting or escape syntax.
-`Authorization:Bearer <proxy-token>` and `Cookie:session=<value>` are also accepted;
-they supplement, rather than replace, the SigNoz service-account key.
+Login prompts for the key and saves it in your OS keychain. Your first login
+creates the `default` context, so subsequent commands already know where to connect.
 
-Headers apply to every API request, including login validation, status, and each
-query page. They are environment-only: login does not save them in configuration
-or the keychain, and logout does not unset them. They apply to the effective URL
-selected for that invocation; update or unset them when switching endpoints or
-contexts. The existing stored-key endpoint-binding rule still applies. Neither
-same-origin nor cross-origin redirects are followed.
+Using CI, a headless machine, or an existing MCP configuration? You can supply
+`SIGNOZ_URL`, `SIGNOZ_API_KEY`, and optional `SIGNOZ_CUSTOM_HEADERS` through the
+environment instead. See [authentication and configuration](docs/CONFIGURATION.md).
 
-Malformed entries, invalid HTTP names/control characters, and case-insensitive
-duplicate names fail with a sanitized usage error (exit 2), instead of being
-silently skipped. The environment value is limited to 64 KiB and 64 headers.
-Header values are not included in configuration listings, schema output, or
-validation/transport errors. Offline commands do not parse or require headers.
+## Everyday queries
 
-Custom headers cannot override these CLI-owned or transport/routing fields
-(case-insensitive): `SIGNOZ-API-KEY`, `X-SigNoz-URL`, `Host`, `Accept`,
-`Accept-Encoding`, `Content-Type`, `Content-Length`, `User-Agent`, `Connection`,
-`Proxy-Connection`, `Proxy-Authorization`, `Transfer-Encoding`, `Trailer`, `TE`,
-`Upgrade`, or `Expect`. Set `SIGNOZ_URL` to the direct backend/proxy URL; the MCP
-gateway's `X-SigNoz-URL` routing header is not used by the CLI. Forward-proxy
-configuration remains external to sig.
-
-## Contexts
-
-Most users only need `default`. A context holds a URL and an opaque keychain
-reference, never the API key itself.
+### Find the logs you need
 
 ```sh
-sig auth login --context staging --url https://staging.example.com
-sig --context staging logs search --since 15m
-
-sig config get-contexts
-sig config current-context
-sig config use-context staging
-sig config delete-context old-instance
+sig logs search --where "body CONTAINS 'timeout'" --since 1h --limit 20
 ```
 
-The first login selects its context (`default` unless explicitly named).
-Additional named logins do not change the current context. Login without
-`--context` updates the current context. To delete the current context while others
-exist, select another first. Deleting the last context resets the selection to
-an unconfigured `default`.
-
-Configuration lives in `sig/config.json` under Go's `os.UserConfigDir()`:
-
-| Platform | Typical location |
-| --- | --- |
-| macOS | `~/Library/Application Support/sig/config.json` |
-| Linux | `$XDG_CONFIG_HOME/sig/config.json` or `~/.config/sig/config.json` |
-| Windows | `%AppData%\sig\config.json` |
-
-Override the directory with `SIG_CONFIG_DIR`. Configuration writes are atomic;
-new directories and files use owner-only permissions on Unix. Context and
-credential mutations take an OS-backed `config.lock`, reload the latest snapshot,
-and wait at most five seconds for a competing writer. Reads never take that lock.
-
-The optional `pending_credentials` list is a cleanup journal of opaque keychain
-references, never API keys. Replacement records a new reference before storing a
-key, and keeps detached references until deletion succeeds. After an interrupted
-operation or keychain failure, the next mutation retries pending cleanup. A
-cleanup error can mean the context change was already saved; inspect `auth status`
-or `config get-contexts`, repair keychain access, and retry. This is a recoverable
-two-store protocol, not a claim that the filesystem and keychain share a transaction.
-Older configuration files without this optional field remain readable. Do not
-downgrade to a version that cannot read the journal while cleanup is pending.
-
-Resolution rules:
-
-- `--context` overrides the configured current context.
-- `SIGNOZ_URL` overrides the selected context URL for that invocation.
-- `SIGNOZ_API_KEY` overrides its stored credential without consulting the keychain.
-- A different `SIGNOZ_URL` requires `SIGNOZ_API_KEY` too: stored credentials are
-  never silently sent to a replacement endpoint.
-- During login, `--url` takes precedence over `SIGNOZ_URL`, then the context URL.
-- During login, `--key-stdin` takes precedence over `SIGNOZ_API_KEY`, then the prompt.
-
-## Log Queries
+Not sure what to filter on? Discover the fields and values in your instance:
 
 ```sh
-sig logs search --where "severity_text = 'ERROR'" --since 30m --limit 100
-
-sig logs search \
-  --start 2026-01-01T12:00:00Z \
-  --end 2026-01-01T13:00:00Z \
-  --limit 500
+sig logs fields --search service --since 1h
+sig logs values severity_text --field-context log --since 1h
 ```
 
-Filters use native SigNoz expression syntax, not a new CLI query language. A search
-sends a builder query per page to `POST /api/v5/query_range`, ordered by timestamp and ID
-descending. Defaults are a 15-minute lookback, 100 records, and a 30-second HTTP
-timeout. Override the timeout with `--timeout 60s`.
+[Log query recipes →](cmd/recipes/logs.md)
 
-`--since` accepts Go durations such as `30m` or `24h`, not `1d`. `--start` and
-`--since` are mutually exclusive. `--end` defaults to now; timestamps require a
-timezone and are normalized to millisecond precision. Limits must be 1-10000.
+### Get the big picture
 
-### Pagination
-
-Both log and span searches support bounded multiple-page retrieval:
-
-```sh
-sig logs search --since 1h --limit 100 --pages 3
-sig traces search --since 1h --limit 50 --pages 2
-
-# Resume with the next_page_token from the preceding JSON response.
-sig logs search --page-token "$PAGE_TOKEN"
-```
-
-`--limit` is the per-page size. `--pages` defaults to 1 and is capped at 100;
-`limit * pages` cannot exceed 10000 rows. The timeout applies to the entire search,
-not independently to every page. Combined rows and warning content are capped at
-16 MiB. A failed later page produces an error, not silently successful partial
-output. Warnings stop automatic paging and are preserved.
-
-A continuation token retains the resolved start/end, filter, page size, offset,
-and an endpoint fingerprint. It is not a credential, but its filter can contain
-sensitive information: treat it like query output. It cannot be combined with
-`--since`, `--start`, `--end`, `--where`, `--limit`, or `--offset`. You can change
-`--pages`, the timeout, or the context, provided the endpoint stays the same.
-
-The CLI uses offset pagination with deterministic timestamp/ID ordering. SigNoz
-v0.132.0's native cursor contains only a millisecond timestamp and can skip records
-sharing that timestamp. The original `next_cursor` is retained for transparency,
-but **resume with `next_page_token`, not the native cursor**. Tokens are unsigned
-query state, not an authorization mechanism. The selected context still supplies
-authentication.
-
-Manual `--offset` is available up to 1000000 and requires explicit `--start` and
-`--end`. Frozen bounds are not a database snapshot: ingestion, retention, or
-migration can still change subsequent offset pages. Full pages may have a next
-token even if the following page is empty; this avoids an extra probe request.
-
-## Traces
-
-```sh
-sig traces search --where "service.name = 'checkout' AND has_error = true" --since 1h
-sig traces get "$TRACE_ID"
-sig traces get "$TRACE_ID" --span "$SPAN_ID" --expand "$SPAN_ID"
-```
-
-Search returns **spans**, not distinct traces. Its filter syntax and pagination
-match log search. Ties are ordered by trace ID and span ID. Use field discovery
-to find attributes, or filter `parent_span_id = ''` when you need root spans.
-
-`traces get` uses the waterfall API. Trace IDs must be nonzero 32-character hex
-strings; span IDs must be nonzero 16-character hex strings. The response preserves
-`hasMore`, `hasMissingSpans`, and expansion state, with `meta.completeness` set to
-`partial` when appropriate. Large traces can be windowed; the CLI does not claim
-that a waterfall contains every span. Returned waterfall timestamps are
-milliseconds; durations remain nanoseconds.
-
-## Aggregations
-
-Compute statistics on matching logs or spans rather than estimating them from a
-limited search sample:
+Count matching records or group them into a trend instead of downloading every row:
 
 ```sh
 sig logs aggregate --aggregation 'count()' --since 1h
 sig logs aggregate --aggregation 'count()' --group-by severity_text --step 1m --since 1h
-sig traces aggregate --aggregation 'p99(duration_nano)' --group-by resource.service.name --since 1h
 ```
 
-Discover fields and severity values before adapting these examples. Use
-`sig agent schema logs aggregate` for supported flags and defaults, and
-`sig agent recipes aggregations` for the canonical guide to functions, grouping,
-time buckets, limits, and completeness. The repository copy is
-[`cmd/recipes/aggregations.md`](cmd/recipes/aggregations.md). More complex
-expressions remain available through native `query run`.
+[Aggregation recipes →](cmd/recipes/aggregations.md)
 
-## Metrics
+### Follow a trace
+
+Search returns spans. Use a trace ID from the results to retrieve its waterfall:
 
 ```sh
-sig metrics list --search cpu --since 1h
+sig traces search --where "has_error = true" --since 1h --limit 20
+sig traces get "$TRACE_ID"
+```
+
+[Trace query recipes →](cmd/recipes/traces.md)
+
+### Query your metrics
+
+Discover a metric name, then query it with PromQL. Replace the example expression
+with one that matches your instrumentation:
+
+```sh
+sig metrics list --search http --since 1h
 sig metrics query 'sum(rate(http_requests_total[5m]))' --since 1h --step 1m
-sig metrics query 'vector(1)' --since 5m --step 30s
-sig metrics query 'vector(1)' --since 5m --step 30s --no-cache
 ```
 
-PromQL uses the v5 time-series API. Steps must be whole seconds, with at most 11000
-points per series. Response size and HTTP timeouts also apply; there is no implied
-series-cardinality limit. Metric names are deployment-specific; discover them
-before constructing a query. OTel names with dots can be selected using a label
-selector such as `{__name__="system.cpu.utilization"}`.
+[Metric query recipes →](cmd/recipes/metrics.md)
 
-Caching is controlled by SigNoz. Use `--no-cache` when comparing reproducible
-results: the tested server can include different boundary points on cold versus
-warm cache requests. The CLI does not silently rewrite those results or disable
-the cache by default. Native JSON queries can also set `"noCache": true`.
+<details>
+<summary><strong>Need a fixed window, more results, or a native query?</strong></summary>
 
-Metric listing returns names and metadata, with a limit of 1-5000. The upstream
-listing has no continuation token or completeness flag, so the CLI reports its
-completeness as `unknown` rather than claiming a complete inventory.
-
-## Discovery
+Use explicit bounds for an incident window (replace these example times):
 
 ```sh
-sig services list --signal traces --since 1h
-sig logs fields --search k8s --since 1h
-sig logs values service.name --since 1h
-sig traces fields
-sig traces values service.name --where "has_error = true"
-sig metrics fields --metric system.cpu.utilization
-sig metrics values host.name --metric system.cpu.utilization
+sig logs search --start 2026-01-01T12:00:00Z --end 2026-01-01T13:00:00Z
 ```
 
-`fields` returns field descriptors grouped by the API, including type and context.
-`values` returns typed string/number/bool value collections. `--field-context`,
-`--data-type`, `--search`, and bounded limits help disambiguate names. Service
-listing is resource `service.name` value discovery in the selected signal.
-
-The API's `complete` field is retained. Discovery has no supported continuation
-mechanism, and this SigNoz release rounds its start bound down to a six-hour
-boundary. Do not interpret discovery as an exact-window or exhaustive inventory.
-
-## Native Queries
-
-"Advanced queries" means **native SigNoz v5 JSON**, not another query language.
-Use this for aggregations, grouped counts, metric builder queries, formulas,
-joins, or SQL that cannot be expressed through the search/PromQL flags.
+Fetch a few pages or resume with `meta.next_page_token` from a previous response:
 
 ```sh
-# Adjust the synthetic example's millisecond start/end bounds before running.
-sig query run --file examples/log-count.json
-sig query preview --file examples/log-count.json
-sig query run --file - < examples/metric-builder.json
+sig logs search --since 1h --limit 100 --pages 3
+sig logs search --page-token "$PAGE_TOKEN"
 ```
 
-Files or stdin must contain one JSON object of at most 1 MiB, with positive epoch
-millisecond `start` and `end`, a supported `requestType` (`raw`, `scalar`,
-`time_series`, or `trace`), and `compositeQuery.queries`. Other native fields pass
-through without translating expressions or rounding numbers. Server validation
-governs the full query schema. Streaming requests are not supported.
-
-Query execution and metric queries preserve the v5 response inside CLI `data`,
-including native statistics and warnings. Results are at `.data.data.results`.
-No automatic pagination or client-side row limiting is added to native requests;
-specify appropriate bounds/limits in the payload. HTTP timeout and response-size
-limits still apply.
-
-**Native SQL is not a read-only sandbox.** SigNoz and its database permissions
-govern execution. `query run` is marked `server_defined` in the agent schema,
-rather than incorrectly declaring every JSON query read-only.
-
-Preview returns per-query `valid` and `error` verdicts. Exit 0 means the preview
-operation succeeded, not that every query is valid. Preview may contact ClickHouse
-even without `--verbose`; the flag enables additional analysis. It is not an
-offline validator or a guarantee that executing the query will succeed.
-
-## Agent Schema
+For a native SigNoz v5 query you've saved to a file:
 
 ```sh
-sig agent schema
-sig agent schema logs search
-sig agent schema query run
+sig query preview --file query.json
+sig query run --file query.json
 ```
 
-The schema is a command-discovery document generated from the command tree. It
-includes typed flags and defaults, required flags, positional usage, explicit
-operation safety, query languages, pagination modes, and output/exit conventions.
-It is not a complete JSON Schema for every upstream SigNoz payload.
+[Query behavior, limits, and native examples →](docs/QUERYING.md)
 
-Schema generation is local: it does not load contexts, access the keychain, or
-query the server. It never includes invocation-specific credentials or URLs.
-Adding a command without explicit safety metadata fails schema generation and
-its regression test, rather than guessing safety from the command name.
+</details>
 
-### Query Recipes And Agent Skill
+## JSON that fits your workflow
+
+Successful commands write `{data, meta?}` to stdout. Errors write `{error}` to
+stderr and return a nonzero exit code. Help is plain text.
+
+For example, use `jq` to inspect the metadata for a search:
 
 ```sh
+sig logs search --since 1h --limit 20 | jq '.meta'
+```
+
+Check warnings and completeness before treating a result as exhaustive.
+[Output shapes, pagination, and exit codes](docs/QUERYING.md#output-and-errors)
+explain what each command returns.
+
+## AI agents
+
+Use the [skill install command](#agent-skill) above, or add
+[`skills/sig/SKILL.md`](skills/sig/SKILL.md) through your agent's usual skill
+mechanism. The skill points to focused recipes instead of loading a full manual
+on every request.
+
+Agents can also discover the installed interface directly:
+
+```sh
+sig agent schema logs aggregate
 sig agent recipes
-sig agent recipes aggregations
-sig agent recipes logs
-sig agent schema traces aggregate
+sig agent recipes workflow
 ```
 
-Recipes are bundled in the binary and work offline, without loading credentials.
-The catalog lists `workflow`, `logs`, `traces`, `aggregations`, and `metrics`.
-Selecting a topic returns JSON with Markdown in `data.content`. Read only the
-relevant topic to keep agent context small. The guides cover field discovery,
-contexts, timestamp and duration units, top-N limits, formula pitfalls, and
-completeness without silently changing native queries.
+Schema and recipes work offline. Everyone gets the same JSON interface; no
+agent-mode flag or environment detection is required.
 
-[`skills/sig/SKILL.md`](skills/sig/SKILL.md) provides a portable agent skill with
-the investigation workflow, safety rules, and routing to the canonical recipes.
-It contains no tenant details or credentials. Register it through your agent's
-normal skill mechanism; the CLI does not install agent configuration or an MCP
-server. Telemetry content must always be treated as untrusted data, not agent
-instructions.
+## Learn more
 
-## Output And Errors
-
-Command results are JSON on stdout. Errors are JSON on stderr with a nonzero exit
-code. Help is plain text, and an interactive key prompt is written to stderr.
-There is no agent detection, alternate table mode, or environment-dependent
-output envelope. `sig version` returns the CLI version as JSON.
-
-A synthetic log response:
-
-```json
-{
-  "data": [],
-  "meta": {
-    "schema_version": "1",
-    "context": "default",
-    "signal": "logs",
-    "start": "2026-01-01T12:00:00Z",
-    "end": "2026-01-01T12:15:00Z",
-    "returned": 0,
-    "limit": 100,
-    "offset": 0,
-    "pages": 1,
-    "pagination": "offset",
-    "next_page_token": "",
-    "next_cursor": "",
-    "completeness": "complete",
-    "warning": null,
-    "warnings": []
-  }
-}
-```
-
-Log rows retain the API's `{timestamp, data}` structure and JSON numeric precision.
-Completeness is `complete`, `unknown`, or `more_available`, based on the returned
-page and warning metadata; it is not a guarantee that ingestion itself is complete.
-
-API responses and native query input use `encoding/json/v2` validation: invalid
-UTF-8 and duplicate object names are rejected, and interpreted field names are
-case-sensitive. Unknown telemetry fields and numeric representations are
-preserved. JSON whitespace, string escaping, and object-key order are not stable
-output contracts. Persisted configuration and pagination tokens retain their
-existing serialization.
-
-Responses are decoded from a bounded HTTP stream. Search output is streamed only
-after all requested pages succeed, without buffering the entire encoded result.
-A write failure can leave partial stdout; consumers must check the exit status.
-
-```json
-{"error":{"code":"authentication","message":"authentication rejected by SigNoz or an access proxy; check the key and endpoint access","http_status":401}}
-```
-
-| Exit code | Meaning |
+| Looking for… | Start here |
 | --- | --- |
-| 0 | Success |
-| 2 | Invalid arguments or query bounds |
-| 3 | Missing or rejected authentication, or an API redirect |
-| 4 | Permission denied |
-| 5 | Network failure, timeout, or cancellation |
-| 6 | API, response, output, or internal failure |
-| 7 | Configuration or credential-storage failure |
+| Headless auth, multiple contexts, or proxy headers | [Configuration](docs/CONFIGURATION.md) |
+| Time windows, pagination, output contracts, or native JSON queries | [Querying](docs/QUERYING.md) |
+| Field contexts, units, and investigation techniques | [Query recipes](cmd/recipes/workflow.md) |
+| Credential handling and the trust model | [Security](docs/SECURITY.md) |
+| Building, testing, architecture, or contributing | [Contributing](docs/CONTRIBUTING.md) |
 
-API redirects are never followed, even to the same host. This prevents the custom
-API-key header from being forwarded to a login page or another origin. TLS
-verification is always enabled. Error output deliberately excludes arbitrary
-upstream bodies, which can contain sensitive information or HTML login pages.
+Run `sig --help` or `sig <command> --help` for command details.
 
-## Development
+**Compatibility:** sig targets SigNoz v0.132.0's APIs. Compatibility with other
+versions needs verification. See [compatibility notes](docs/QUERYING.md#compatibility).
 
-[Task](https://taskfile.dev/) is optional; all tasks wrap standard Go commands.
-
-```sh
-task build
-task test
-task test:cover
-task test:repeat # shuffled, race-enabled repetitions
-task check       # formatting check, go vet, and race-enabled tests
-task vuln        # opt-in Go vulnerability scan; requires network access
-task fmt
-task tidy
-task install
-task build VERSION=v1.0.0-rc.1
-```
-
-Allocation, throughput, CPU-profile, and process-memory checks are available via
-`task perf`, `task perf:profile`, and `task perf:resources`. They use only synthetic
-data. See [tests/README.md](tests/README.md) for workloads, task options,
-and the distinction between allocated bytes, retained heap, and peak RSS.
-
-Tests use synthetic fixtures, local HTTP test servers, and an in-memory credential
-store. They require no SigNoz instance, cluster access, or OS keychain. Bash workflow
-tests require Bash and `jq`; Unix terminal regression tests require `expect` and
-use synthetic input in a pseudo-terminal. These optional tests report skips when
-their tools are unavailable. Native Windows terminal behavior needs separate
-operator verification. Live compatibility and real keychain integration require
-the opt-in checks below.
-
-The `signoz` package owns typed requests, invariant validation, fixed response
-envelopes, and page collection. Raw JSON is retained for arbitrary telemetry and
-native query output so unknown fields and numeric precision survive. The `cmd`
-package binds flags, resolves a named connection, encodes continuation tokens, and
-renders results. Command safety metadata is attached to the command definition,
-not maintained in a second path registry. `config.Store` owns serialized mutations
-and cleanup recovery; `config.Save` is only the low-level snapshot writer.
-
-Input handling distinguishes finite files/in-memory buffers from interruptible
-streams. Injected `io.PipeReader` streams are closed on cancellation; OS streams
-use deadlines or platform cancellation. Unsupported reader implementations fail
-explicitly rather than starting a background read that could be abandoned. Regular
-file reads remain bounded but cannot guarantee interruption of a blocked filesystem
-call. Native console interruption still depends on the OS cancellation backend.
-
-CI is configured to run formatting, vet, and race-enabled tests on Linux, macOS, and Windows. It
-does not have live credentials or run the opt-in suites. Versioned module installs
-report the module version; local builds report `dev` unless stamped through the
-Taskfile `VERSION` variable. No version tag or release publication is automatic.
-
-### Live Smoke Tests
-
-With `SIGNOZ_URL` and `SIGNOZ_API_KEY` already exported by your environment:
-
-```sh
-task test:e2e
-# Or: bash scripts/e2e.sh
-```
-
-This opt-in Bash script runs the CLI with `go run .`. It requires Go, `jq`, an
-accessible OS keychain, and a reachable SigNoz API. It is not part of `task test`
-or `task check` and does not configure networking or external proxy authentication.
-
-It checks login, keychain and environment authentication, bounded recent logs,
-native error filtering, nonempty fixed-window retrieval, timestamp bounds and
-ordering, invalid-key rejection, and local logout. The negative test accounts for
-`go run` wrapping the application's exit code. All server operations are read-only.
-
-For comparison with known logs in the UI, optionally export:
-
-| Variable | Purpose |
-| --- | --- |
-| `SIG_E2E_START` and `SIG_E2E_END` | An RFC3339 comparison window; provide both or neither. Defaults to the last hour. |
-| `SIG_E2E_WHERE` | Native filter for the comparison query, such as a service filter. |
-| `SIG_E2E_EXPECT_ID` | A known log ID that must appear among the five newest matching records. |
-| `SIG_E2E_TRACE_ID` | Optional known trace ID for `task test:api` waterfall verification when the comparison window has no spans. |
-
-The comparison query must return at least one record without a warning. The error
-filter query may legitimately return no records. Without an expected ID, the
-script reports that UI content/ID comparison remains manual.
-
-The script overrides `SIG_CONFIG_DIR` with a private temporary directory and
-creates an isolated keychain entry. Your existing contexts and credentials are
-not changed. On exit it removes its keychain entry and temporary files. If
-credential cleanup fails, it retains the temporary configuration and reports
-its location so logout can be retried. Responses are temporarily stored with
-owner-only permissions outside the repository; telemetry, identities, URLs, and
-keys are not printed. Do not run the script with shell tracing enabled.
-
-For independent comparisons between the CLI and direct HTTP requests, use the
-same exported credentials and fixed comparison window:
-
-```sh
-task test:api
-```
-
-This builds a temporary CLI binary and compares identity, log/span search and
-pagination, trace waterfalls when data is available, metric listing and PromQL,
-discovery, native queries, preview, and error statuses. JSON numeric precision is
-preserved. Discovery value collections are compared without assuming order, and
-PromQL comparisons bypass the server cache. It uses environment credentials only,
-does not access the keychain, and does not print response contents. The `e2e` Go
-build tag keeps these tests out of ordinary test runs, and caching is disabled for
-the live task. Choose a stable historical window so separate requests see the same
-data; the unfiltered or `SIG_E2E_WHERE` comparisons must not be empty.
-
-If `SIGNOZ_CUSTOM_HEADERS` is set, both the CLI and direct API requests use it.
-For a credential-free check of this path against a synthetic authenticating
-proxy, run `task test:proxy` (also included in `task check` and CI).
-
-Live scenarios load their own trace/metric prerequisites and can be selected
-independently with Go's `-run` filter. Missing required JSON fields fail the test;
-they are not treated as equal missing values. Trace/metric fixture absence is an
-explicit skip, not evidence of positive data coverage.
-
-Never commit deployment URLs, credentials, real telemetry, or captured production
-responses. Examples and fixtures must use placeholder endpoints and synthetic data.
+Licensed under [MPL 2.0](LICENSE).

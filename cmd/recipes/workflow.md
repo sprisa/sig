@@ -11,8 +11,10 @@ fields and metric metadata; examples are not promises that an attribute exists.
    MCP format `Name:Value,Name:Value`. It applies to login and queries, including
    those using a stored API key, but is never persisted. Change or unset it when
    switching endpoints. Values cannot contain commas; malformed or reserved
-   headers fail with a sanitized usage error. See the README's reverse-proxy
-   header reference for the full format and restrictions.
+   headers fail with a sanitized usage error. See the
+   [configuration guide](../../docs/CONFIGURATION.md#reverse-proxy-headers) for the
+   format and the [security reference](../../docs/SECURITY.md#custom-header-boundaries)
+   for reserved headers.
 2. Use `sig agent schema logs aggregate` (or another command path) for the exact
    flags. Read only the relevant `sig agent recipes TOPIC`, not every guide.
 3. Fix an investigation window. CLI `--start`/`--end` take RFC3339 with timezone;

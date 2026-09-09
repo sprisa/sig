@@ -5,6 +5,23 @@ description: Investigate SigNoz logs, spans, traces, and metrics using the sig C
 
 # SigNoz Investigations With sig
 
+## Ensure the CLI Is Available
+
+Before using the schema or recipes, check:
+
+```sh
+sig version
+```
+
+If `sig` is not found, install it with Go:
+
+```sh
+go install github.com/sprisa/sig@latest
+```
+
+Installation does not configure authentication. Use the operator-provided
+endpoint and credentials; consult the workflow recipe for setup and recovery.
+
 ## Load Only What You Need
 
 Use `sig agent schema COMMAND SUBCOMMAND` for the installed command's flags and
