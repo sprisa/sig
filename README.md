@@ -76,6 +76,46 @@ Logout removes the selected context's stored key, not its URL, and does not revo
 the server-side key. An injected `SIGNOZ_API_KEY` still works after local logout.
 Revoke keys in SigNoz when needed.
 
+### Reverse-Proxy Headers (MCP-Compatible Format)
+
+If SigNoz is behind an authenticating reverse proxy, inject
+`SIGNOZ_CUSTOM_HEADERS` alongside the API key or use it with a stored key:
+
+```sh
+# Syntax example only; inject real values through your secret manager/environment.
+export SIGNOZ_CUSTOM_HEADERS='CF-Access-Client-Id:example.access,CF-Access-Client-Secret:<proxy-secret>'
+sig auth status
+sig logs search --since 15m
+```
+
+This uses the official MCP server's `Name:Value,Name:Value` format. Entries split
+at commas and at the first colon in each entry, with surrounding whitespace
+trimmed. Colons within values are preserved. Empty values are allowed. Commas
+inside values are not representable: the format has no quoting or escape syntax.
+`Authorization:Bearer <proxy-token>` and `Cookie:session=<value>` are also accepted;
+they supplement, rather than replace, the SigNoz service-account key.
+
+Headers apply to every API request, including login validation, status, and each
+query page. They are environment-only: login does not save them in configuration
+or the keychain, and logout does not unset them. They apply to the effective URL
+selected for that invocation; update or unset them when switching endpoints or
+contexts. The existing stored-key endpoint-binding rule still applies. Neither
+same-origin nor cross-origin redirects are followed.
+
+Malformed entries, invalid HTTP names/control characters, and case-insensitive
+duplicate names fail with a sanitized usage error (exit 2), instead of being
+silently skipped. The environment value is limited to 64 KiB and 64 headers.
+Header values are not included in configuration listings, schema output, or
+validation/transport errors. Offline commands do not parse or require headers.
+
+Custom headers cannot override these CLI-owned or transport/routing fields
+(case-insensitive): `SIGNOZ-API-KEY`, `X-SigNoz-URL`, `Host`, `Accept`,
+`Accept-Encoding`, `Content-Type`, `Content-Length`, `User-Agent`, `Connection`,
+`Proxy-Connection`, `Proxy-Authorization`, `Transfer-Encoding`, `Trailer`, `TE`,
+`Upgrade`, or `Expect`. Set `SIGNOZ_URL` to the direct backend/proxy URL; the MCP
+gateway's `X-SigNoz-URL` routing header is not used by the CLI. Forward-proxy
+configuration remains external to sig.
+
 ## Contexts
 
 Most users only need `default`. A context holds a URL and an opaque keychain
@@ -514,6 +554,10 @@ does not access the keychain, and does not print response contents. The `e2e` Go
 build tag keeps these tests out of ordinary test runs, and caching is disabled for
 the live task. Choose a stable historical window so separate requests see the same
 data; the unfiltered or `SIG_E2E_WHERE` comparisons must not be empty.
+
+If `SIGNOZ_CUSTOM_HEADERS` is set, both the CLI and direct API requests use it.
+For a credential-free check of this path against a synthetic authenticating
+proxy, run `task test:proxy` (also included in `task check` and CI).
 
 Live scenarios load their own trace/metric prerequisites and can be selected
 independently with Go's `-run` filter. Missing required JSON fields fail the test;

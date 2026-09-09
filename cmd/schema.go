@@ -102,7 +102,7 @@ func (a *app) schema(_ context.Context, cmd *cli.Command) error {
 	}
 	return a.emit(map[string]any{
 		"schema_version": "1", "cli_version": buildVersion(), "command": description, "global_flags": globals,
-		"environment": []string{"SIGNOZ_URL", "SIGNOZ_API_KEY", "SIG_CONFIG_DIR"},
+		"environment": []string{"SIGNOZ_URL", "SIGNOZ_API_KEY", "SIGNOZ_CUSTOM_HEADERS", "SIG_CONFIG_DIR"},
 		"output":      map[string]any{"success": "stdout: {data, meta?}", "failure": "stderr: {error: {code, message, http_status?}}", "help": "plain text", "numeric_precision": "upstream JSON numbers preserved"},
 		"exit_codes":  exitDescriptions(),
 		"guidance": []string{

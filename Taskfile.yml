@@ -52,6 +52,11 @@ tasks:
     cmds:
       - go test -tags=e2e -run '^TestLiveAPIParity$' -count=1 -v ./scripts
 
+  test:proxy:
+    desc: Test the compiled CLI and direct API harness behind a synthetic auth proxy (no credentials required)
+    cmds:
+      - go test -race -tags=e2e -run '^TestProxyHeaderParity$' -count=1 ./scripts
+
   test:repeat:
     desc: Repeat race-enabled tests with randomized order
     cmds:
@@ -132,4 +137,4 @@ tasks:
 
   check:
     desc: Check formatting, static analysis, and race-tested behavior
-    deps: [fmt:check, vet, test:race]
+    deps: [fmt:check, vet, test:race, test:proxy]

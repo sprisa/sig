@@ -6,7 +6,13 @@ fields and metric metadata; examples are not promises that an attribute exists.
 1. Check `sig auth status`. Use `SIGNOZ_URL` and `SIGNOZ_API_KEY` for headless
    execution or authenticate once with `sig auth login`. Never put a key in a
    query, shared command transcript, or committed file. Networking and temporary
-   loopback port-forwards are operator-managed, not built into sig.
+   loopback port-forwards are operator-managed, not built into sig. If the API is
+   behind an authenticating reverse proxy, `SIGNOZ_CUSTOM_HEADERS` accepts the
+   MCP format `Name:Value,Name:Value`. It applies to login and queries, including
+   those using a stored API key, but is never persisted. Change or unset it when
+   switching endpoints. Values cannot contain commas; malformed or reserved
+   headers fail with a sanitized usage error. See the README's reverse-proxy
+   header reference for the full format and restrictions.
 2. Use `sig agent schema logs aggregate` (or another command path) for the exact
    flags. Read only the relevant `sig agent recipes TOPIC`, not every guide.
 3. Fix an investigation window. CLI `--start`/`--end` take RFC3339 with timezone;

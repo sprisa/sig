@@ -27,6 +27,8 @@ import (
 type liveHarness struct {
 	endpoint, key, binary, dir string
 	start, end                 time.Time
+	customHeaders              string
+	headers                    http.Header
 }
 type liveResponse struct {
 	Status string
@@ -48,6 +50,11 @@ func newLiveHarness(t *testing.T) *liveHarness {
 	h.endpoint, err = signoz.NormalizeURL(h.endpoint)
 	if err != nil {
 		t.Fatal("invalid API URL")
+	}
+	h.customHeaders = os.Getenv("SIGNOZ_CUSTOM_HEADERS")
+	h.headers, err = signoz.ParseCustomHeaders(h.customHeaders)
+	if err != nil {
+		t.Fatal("invalid SIGNOZ_CUSTOM_HEADERS; contents suppressed")
 	}
 	h.end = time.Now().UTC().Truncate(time.Millisecond)
 	h.start = h.end.Add(-time.Hour)
@@ -126,7 +133,7 @@ func (h *liveHarness) cli(t *testing.T, key string, exit int, args ...string) li
 			c.Env = append(c.Env, item)
 		}
 	}
-	c.Env = append(c.Env, "SIGNOZ_URL="+h.endpoint, "SIGNOZ_API_KEY="+key, "SIG_CONFIG_DIR="+filepath.Join(h.dir, "config"))
+	c.Env = append(c.Env, "SIGNOZ_URL="+h.endpoint, "SIGNOZ_API_KEY="+key, "SIGNOZ_CUSTOM_HEADERS="+h.customHeaders, "SIG_CONFIG_DIR="+filepath.Join(h.dir, "config"))
 	var out, stderr bytes.Buffer
 	c.Stdout = &out
 	c.Stderr = &stderr
@@ -178,6 +185,9 @@ func (h *liveHarness) api(t *testing.T, method, path, key string, body any, stat
 	req, err := http.NewRequest(method, h.endpoint+path, input)
 	if err != nil {
 		t.Fatal("invalid direct request")
+	}
+	if h.headers != nil {
+		req.Header = h.headers.Clone()
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("SIGNOZ-API-KEY", key)

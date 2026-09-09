@@ -77,7 +77,7 @@ func (a *app) login(ctx context.Context, cmd *cli.Command) error {
 		}
 		key = strings.TrimSpace(value)
 	}
-	client, err := signoz.New(endpoint, key, cmd.Duration("timeout"))
+	client, err := signoz.NewWithHeaders(endpoint, key, cmd.Duration("timeout"), a.Getenv("SIGNOZ_CUSTOM_HEADERS"))
 	if err != nil {
 		return err
 	}

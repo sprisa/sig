@@ -26,9 +26,10 @@ type Error struct {
 func (e *Error) Error() string { return e.Message }
 
 type Client struct {
-	base *url.URL
-	key  string
-	http *http.Client
+	base    *url.URL
+	key     string
+	http    *http.Client
+	headers http.Header
 }
 
 func NormalizeURL(raw string) (string, error) {
@@ -47,6 +48,13 @@ func NormalizeURL(raw string) (string, error) {
 }
 
 func New(rawURL, key string, timeout time.Duration) (*Client, error) {
+	return NewWithHeaders(rawURL, key, timeout, "")
+}
+
+// NewWithHeaders snapshots MCP-format custom headers for this client's endpoint.
+// Use New when no additional headers are needed. Neither constructor reads the
+// environment, and clients never follow redirects, including same-origin ones.
+func NewWithHeaders(rawURL, key string, timeout time.Duration, customHeaders string) (*Client, error) {
 	normalized, err := NormalizeURL(rawURL)
 	if err != nil {
 		return nil, err
@@ -57,8 +65,12 @@ func New(rawURL, key string, timeout time.Duration) (*Client, error) {
 	if timeout <= 0 {
 		return nil, &Error{Code: "usage", Message: "timeout must be positive"}
 	}
+	headers, err := ParseCustomHeaders(customHeaders)
+	if err != nil {
+		return nil, err
+	}
 	u, _ := url.Parse(normalized)
-	return &Client{base: u, key: key, http: &http.Client{
+	return &Client{base: u, key: key, headers: headers, http: &http.Client{
 		Timeout:       timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}, nil
@@ -132,6 +144,9 @@ func (c *Client) response(ctx context.Context, method, path string, body any, pa
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), input)
 	if err != nil {
 		return nil, &Error{Code: "usage", Message: "could not construct request"}
+	}
+	if c.headers != nil {
+		req.Header = c.headers.Clone()
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("SIGNOZ-API-KEY", c.key)

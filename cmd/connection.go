@@ -87,6 +87,6 @@ func (a *app) connect(c *cli.Command) (connection, error) {
 		}
 		source = "keychain"
 	}
-	client, err := signoz.New(endpoint, key, c.Duration("timeout"))
+	client, err := signoz.NewWithHeaders(endpoint, key, c.Duration("timeout"), a.Getenv("SIGNOZ_CUSTOM_HEADERS"))
 	return connection{Client: client, Context: name, Endpoint: endpoint, CredentialSource: source}, err
 }
