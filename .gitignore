@@ -1,4 +1,5 @@
 /bin/
+/dist/
 /sig
 /sig.exe
 /.task/
@@ -6,3 +7,4 @@
 .env
 .env.*
 !.env.example
+.DS_STORE

@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: sig
+dist: dist/goreleaser
+
+builds:
+  - id: sig
+    main: .
+    binary: sig
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/sprisa/sig/cmd.Version=v{{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - docs/*.md
+      - docs/assets/*
+      - cmd/recipes/*.md
+      - skills/sig/SKILL.md
+      - examples/*.json
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ .Version }}-dev"
+
+release:
+  github:
+    owner: sprisa
+    name: sig
+  prerelease: auto

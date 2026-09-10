@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">sig</title>
+  <desc id="desc">A small mint-green robot with a smiling terminal face and a golden antenna.</desc>
+  <ellipse cx="128" cy="226" rx="65" ry="10" fill="#142D43" opacity=".12"/>
+  <g stroke="#142D43" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 65V39"/>
+    <circle cx="128" cy="27" r="12" fill="#FFD782"/>
+    <rect x="29" y="107" width="24" height="48" rx="12" fill="#63CDB4"/>
+    <rect x="203" y="107" width="24" height="48" rx="12" fill="#63CDB4"/>
+    <rect x="78" y="188" width="28" height="29" rx="12" fill="#63CDB4"/>
+    <rect x="150" y="188" width="28" height="29" rx="12" fill="#63CDB4"/>
+    <rect x="47" y="64" width="162" height="137" rx="39" fill="#97EBD5"/>
+  </g>
+  <path d="M72 91C77 82 84 79 96 79H148" stroke="#E6FFF6" stroke-width="7" stroke-linecap="round"/>
+  <rect x="66" y="98" width="124" height="79" rx="25" fill="#142D43"/>
+  <rect x="92" y="116" width="14" height="20" rx="7" fill="#E6FFF6"/>
+  <rect x="150" y="116" width="14" height="20" rx="7" fill="#E6FFF6"/>
+  <circle cx="85" cy="148" r="6" fill="#FFB8A8"/>
+  <circle cx="171" cy="148" r="6" fill="#FFB8A8"/>
+  <path d="M112 148C120 157 136 157 144 148" stroke="#97EBD5" stroke-width="5" stroke-linecap="round"/>
+  <path d="M212 38V54M204 46H220" stroke="#FFD782" stroke-width="5" stroke-linecap="round"/>
+</svg>

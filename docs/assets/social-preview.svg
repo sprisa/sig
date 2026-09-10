@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1280" height="640" viewBox="0 0 1280 640" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">sig — A SigNoz CLI built for AI agents</title>
+  <desc id="desc">The sig robot beside the project name, tagline, and a terminal showing log, trace, and metric commands.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#112938"/>
+      <stop offset="1" stop-color="#0B1625"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#4EA38F" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#4EA38F" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" stroke="#CAE7ED" stroke-opacity=".035"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <ellipse cx="1060" cy="210" rx="420" ry="400" fill="url(#glow)"/>
+  <image x="65" y="53" width="138" height="138" xlink:href="sig.svg"/>
+  <g font-family="Inter, Helvetica Neue, Arial, sans-serif">
+    <text x="221" y="158" fill="#F2FAF7" font-size="106" font-weight="750" letter-spacing="-5">sig</text>
+    <text x="78" y="282" fill="#F2FAF7" font-size="58" font-weight="700" letter-spacing="-1.6">A SigNoz CLI</text>
+    <text x="78" y="354" fill="#97EBD5" font-size="58" font-weight="700" letter-spacing="-1.6">built for AI agents.</text>
+    <text x="80" y="410" fill="#A8BDC8" font-size="25">Logs, traces, and metrics. Structured JSON.</text>
+    <rect x="79" y="447" width="161" height="38" rx="19" fill="#1C3A45" stroke="#31555D"/>
+    <text x="159.5" y="472" text-anchor="middle" fill="#BCDDD5" font-size="16" font-weight="500">Direct API access</text>
+    <rect x="251" y="447" width="140" height="38" rx="19" fill="#1C3A45" stroke="#31555D"/>
+    <text x="321" y="472" text-anchor="middle" fill="#BCDDD5" font-size="16" font-weight="500">Offline recipes</text>
+    <rect x="402" y="447" width="134" height="38" rx="19" fill="#1C3A45" stroke="#31555D"/>
+    <text x="469" y="472" text-anchor="middle" fill="#BCDDD5" font-size="16" font-weight="500">Open source</text>
+  </g>
+  <rect x="746" y="177" width="450" height="320" rx="23" fill="#030C14" opacity=".24"/>
+  <rect x="742" y="165" width="450" height="320" rx="23" fill="#10212E" stroke="#36535F"/>
+  <path d="M743 216H1191" stroke="#2B4653"/>
+  <circle cx="769" cy="191" r="5" fill="#FFB8A8"/>
+  <circle cx="789" cy="191" r="5" fill="#FFD782"/>
+  <circle cx="809" cy="191" r="5" fill="#97EBD5"/>
+  <text x="967" y="197" text-anchor="middle" font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="14" fill="#8DA9B7">sig</text>
+  <g font-family="Menlo, DejaVu Sans Mono, monospace" font-size="19">
+    <text x="772" y="264" fill="#97EBD5">$ <tspan fill="#ECF5F6">sig logs search</tspan></text>
+    <text x="795" y="294" fill="#8DA9B7">--since 1h</text>
+    <text x="772" y="345" fill="#97EBD5">$ <tspan fill="#ECF5F6">sig traces get $TRACE_ID</tspan></text>
+    <text x="772" y="396" fill="#97EBD5">$ <tspan fill="#ECF5F6">sig metrics query</tspan></text>
+    <text x="795" y="426" fill="#FFD782">'vector(1)'</text>
+  </g>
+  <path d="M80 555H1192" stroke="#32505C" stroke-opacity=".8"/>
+  <g font-family="Inter, Helvetica Neue, Arial, sans-serif" font-size="18">
+    <text x="80" y="594" fill="#A8BDC8">github.com/<tspan fill="#E2F5EF">sprisa/sig</tspan></text>
+    <text x="1192" y="594" text-anchor="end" fill="#7F9BAA">Go · MPL 2.0</text>
+  </g>
+</svg>

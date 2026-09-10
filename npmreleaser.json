@@ -1,0 +1,38 @@
+{
+  "package.json": {
+    "name": "@sprisa/sig",
+    "version": "0.0.1",
+    "description": "A SigNoz CLI built for AI agents. Query logs, traces, and metrics with structured JSON output.",
+    "license": "MPL-2.0",
+    "keywords": [
+      "signoz",
+      "observability",
+      "logs",
+      "traces",
+      "metrics",
+      "cli",
+      "ai-agents"
+    ],
+    "homepage": "https://github.com/sprisa/sig",
+    "bugs": {
+      "url": "https://github.com/sprisa/sig/issues"
+    },
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/sprisa/sig.git"
+    },
+    "publishConfig": {
+      "access": "public"
+    }
+  },
+  "bin": "sig",
+  "gobuild": "go build -trimpath",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64",
+    "darwin/amd64",
+    "darwin/arm64",
+    "windows/amd64",
+    "windows/arm64"
+  ]
+}

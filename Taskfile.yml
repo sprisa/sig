@@ -3,7 +3,8 @@
 version: '3'
 
 vars:
-  VERSION: dev
+  VERSION:
+    sh: tr -d '[:space:]' < version.txt
   BENCH_TIME: 300ms
   BENCH_COUNT: '3'
   PERF_CASE: near_cap
@@ -20,12 +21,119 @@ tasks:
   build:
     desc: Build bin/sig
     cmds:
-      - go build -trimpath -ldflags "-X github.com/sprisa/sig/cmd.Version={{.VERSION}}" -o bin/sig .
+      - go build -trimpath -ldflags "-X github.com/sprisa/sig/cmd.Version=v{{.VERSION}}" -o bin/sig .
 
   install:
     desc: Install sig into GOBIN (or GOPATH/bin)
     cmds:
-      - go install -trimpath .
+      - go install -trimpath -ldflags "-X github.com/sprisa/sig/cmd.Version=v{{.VERSION}}" .
+
+  assets:
+    desc: Render the 1280x640 GitHub social preview (requires librsvg)
+    cmds:
+      - rsvg-convert --width 1280 --height 640 --output docs/assets/social-preview.png docs/assets/social-preview.svg
+
+  build:go:
+    desc: Cross-build snapshot binaries with GoReleaser (no publishing)
+    env:
+      GORELEASER_CURRENT_TAG: 'v{{.VERSION}}'
+    cmds:
+      - goreleaser build --snapshot --clean
+
+  build:npm:
+    desc: Build npm packages for all six platforms (no publishing)
+    deps: [release:version]
+    env:
+      CGO_ENABLED: '0'
+      GOFLAGS: "'-ldflags=-s -w -X github.com/sprisa/sig/cmd.Version=v{{.VERSION}}'"
+    cmds:
+      - npx --yes @sprisa/npmreleaser@0.0.5 build --clean
+      # Normalize npmreleaser's scoped-package metadata before packing.
+      - npm --prefix ./dist/npm/@sprisa/sig pkg set --json 'bin={"sig":"sig"}' 'files=["sig","README.md","LICENSE"]'
+      - chmod 755 ./dist/npm/@sprisa/sig/sig
+
+  release:check:
+    desc: Validate release configuration
+    cmds:
+      - goreleaser check
+      - jq empty npmreleaser.json
+
+  release:snapshot:
+    desc: Build snapshot archives and checksums with GoReleaser (no publishing)
+    env:
+      GORELEASER_CURRENT_TAG: 'v{{.VERSION}}'
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  release:npm:dry-run:
+    desc: Build and inspect npm packages without publishing
+    cmds:
+      - task: release:npm
+        vars:
+          PUBLISH_ARGS: --dry-run
+
+  release:npm:
+    desc: Build and publish npm platform packages, then the wrapper
+    deps: [build:npm]
+    vars:
+      NPM_TAG: '{{if contains "-" .VERSION}}next{{else}}latest{{end}}'
+    cmds:
+      - |
+        for package in ./dist/npm/@sprisa/sig_*; do
+          npm publish "$package" --access public --tag '{{.NPM_TAG}}' {{.PUBLISH_ARGS | default ""}} || exit $?
+        done
+        npm publish ./dist/npm/@sprisa/sig --access public --tag '{{.NPM_TAG}}' {{.PUBLISH_ARGS | default ""}}
+
+  release:github:
+    desc: Upload prepared GoReleaser archives to a GitHub release
+    cmds:
+      - git push origin HEAD
+      - git push origin 'v{{.VERSION}}'
+      - >-
+        gh release create 'v{{.VERSION}}'
+        ./dist/goreleaser/*.tar.gz ./dist/goreleaser/*.zip ./dist/goreleaser/checksums.txt
+        --repo sprisa/sig --title 'v{{.VERSION}}' --verify-tag --generate-notes
+        {{if contains "-" .VERSION}}--prerelease{{end}}
+
+  release:version:
+    internal: true
+    cmds:
+      - mkdir -p dist
+      - jq --arg version '{{.VERSION}}' '."package.json".version = $version' npmreleaser.json > dist/npmreleaser.json
+      - mv dist/npmreleaser.json npmreleaser.json
+
+  release:tag:
+    internal: true
+    deps: [release:version]
+    cmds:
+      - git add -- version.txt npmreleaser.json
+      - |
+        if ! git diff --cached --quiet -- version.txt npmreleaser.json; then
+          git commit -m 'chore: release v{{.VERSION}}' -- version.txt npmreleaser.json
+        fi
+      - |
+        if git rev-parse --verify 'refs/tags/v{{.VERSION}}' >/dev/null 2>&1; then
+          test "$(git rev-list -n 1 'v{{.VERSION}}')" = "$(git rev-parse HEAD)"
+        else
+          git tag -a 'v{{.VERSION}}' -m 'v{{.VERSION}}'
+        fi
+
+  publish:
+    desc: Commit and tag version.txt, build archives, publish npm, then create the GitHub release
+    preconditions:
+      - sh: git diff --quiet HEAD -- . ':!version.txt' ':!npmreleaser.json'
+        msg: Commit code changes before publishing; only release metadata may be modified
+      - sh: test -z "$(git ls-files --others --exclude-standard -- . ':!version.txt' ':!npmreleaser.json')"
+        msg: Commit new project files before publishing
+      - sh: gh auth status >/dev/null 2>&1
+        msg: Run gh auth login first
+      - sh: npm whoami >/dev/null 2>&1
+        msg: Run npm login first
+    cmds:
+      - task: release:tag
+      - goreleaser release --clean --skip=publish
+      - task: release:npm
+      - task: release:github
 
   test:
     desc: Run synthetic unit and HTTP integration tests (no credentials required)

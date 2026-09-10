@@ -1,4 +1,5 @@
 <div align="center">
+  <img src="docs/assets/sig.svg" alt="sig robot" width="128" height="128">
   <h1>sig</h1>
   <p><strong>A SigNoz CLI built for AI agents.</strong></p>
   <p>Query logs, traces, and metrics with structured JSON output.</p>
@@ -31,11 +32,11 @@ in a shell pipeline or an agent's tool call.
 ### CLI
 
 ```sh
-go install github.com/sprisa/sig@latest
+go install github.com/sprisa/sig@latest # with Golang (no auto update)
+npm install -g @sprisa/sig # with npm (no auto update)
 ```
 
-Requires [Go](https://go.dev/dl/) 1.27.1 or newer. Make sure your Go binary directory
-is on `PATH`, then check the installation:
+Check either installation:
 
 ```sh
 sig version

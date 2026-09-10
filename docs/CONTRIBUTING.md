@@ -215,16 +215,56 @@ only the credential-free synthetic scenario and is safe for ordinary CI.
 
 ## Versioning and releases
 
-Versioned module installs report their module version. Local builds report `dev`
-unless stamped:
+[`version.txt`](../version.txt) is the source of truth. Use a bare semantic version
+such as `0.0.1` or `0.1.0-rc.1`, without a `v` prefix. Task builds stamp the binary
+with that version; Git tags use `v<VERSION>`. Direct `go build` defaults to `dev`,
+and versioned `go install` reports the module version.
+
+Releases run locally. Install GoReleaser v2, Node.js/npm, `jq`, and `gh`, then
+authenticate with `npm login` and `gh auth login`. npm access must allow public
+packages under `@sprisa`.
+
+After committing code changes, the workflow is:
+
+1. Bump `version.txt`.
+2. Run `task publish`.
+
+`publish` synchronizes the version in `npmreleaser.json`, commits just those two
+release metadata files when changed, and creates an annotated tag. It then runs
+these steps in order:
+
+1. GoReleaser builds native archives and checksums without publishing them.
+2. npmreleaser builds the platform packages; npm publishes them before the wrapper.
+3. Git pushes the current branch and tag; `gh` creates the GitHub release with
+   generated notes, archives, and checksums.
+
+Prereleases go to npm's `next` tag and are marked as GitHub prereleases. Stable
+versions go to `latest`. Publishing changes remote state; the build and dry-run
+tasks below do not:
 
 ```sh
-task build VERSION=v1.0.0-rc.1
+task release:check         # Validate configuration
+task build:go              # Cross-build snapshot binaries
+task release:snapshot      # Build snapshot archives and checksums
+task build:npm             # Build npm packages, syncing the version from version.txt
+task release:npm:dry-run   # Build and inspect npm packages without uploading
 ```
 
-Building does not create a Git tag or publish a release. Test API compatibility
-against the intended SigNoz version; a successful cross-build alone does not
-establish native terminal, keychain, or backend compatibility.
+Both packagers target Linux, macOS, and Windows on amd64 and arm64. GoReleaser
+outputs live in `dist/goreleaser/`; npm packages live in `dist/npm/`. The npm entry
+package is `@sprisa/sig`, with a `sig` command and platform-specific optional
+dependencies. Keep optional dependencies enabled when installing it.
+
+The Taskfile normalizes npmreleaser 0.0.5's generated scoped-package `bin`/`files`
+metadata and launcher permissions before packaging. No custom release script or
+release CI workflow is needed. The individual `release:npm` and `release:github` tasks are also available
+for manual operation. Publishing across registries is not atomic: if a step
+fails, inspect which packages/releases exist before retrying; npm versions cannot
+be overwritten.
+
+Test API compatibility against the intended SigNoz version; a successful
+cross-build alone does not establish native terminal, keychain, or backend
+compatibility.
 
 For issues and pull requests, use synthetic data and placeholder URLs. Follow
 the [security guidance](SECURITY.md) when handling credentials or query output.
