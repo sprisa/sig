@@ -1,7 +1,7 @@
 {
   "package.json": {
     "name": "@sprisa/sig",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "description": "A SigNoz CLI built for AI agents. Query logs, traces, and metrics with structured JSON output.",
     "license": "MPL-2.0",
     "keywords": [

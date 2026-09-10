@@ -47,7 +47,7 @@ tasks:
       CGO_ENABLED: '0'
       GOFLAGS: "'-ldflags=-s -w -X github.com/sprisa/sig/cmd.Version=v{{.VERSION}}'"
     cmds:
-      - npx --yes @sprisa/npmreleaser@0.0.5 build --clean
+      - npx --yes @sprisa/npmreleaser@latest build --clean
       # Normalize npmreleaser's scoped-package metadata before packing.
       - npm --prefix ./dist/npm/@sprisa/sig pkg set --json 'bin={"sig":"sig"}' 'files=["sig","README.md","LICENSE"]'
       - chmod 755 ./dist/npm/@sprisa/sig/sig
