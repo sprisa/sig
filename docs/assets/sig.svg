@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title desc">
   <title id="title">sig</title>
-  <desc id="desc">A small mint-green robot with a smiling terminal face and a golden antenna.</desc>
+  <desc id="desc">A small mint-green robot with relaxed half-lidded eyes, rosy cheeks, a golden antenna, and an O-shaped mouth taking a drag from a tiny cigarette with curling smoke.</desc>
   <ellipse cx="128" cy="226" rx="65" ry="10" fill="#142D43" opacity=".12"/>
   <g stroke="#142D43" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
     <path d="M128 65V39"/>
@@ -13,10 +13,18 @@
   </g>
   <path d="M72 91C77 82 84 79 96 79H148" stroke="#E6FFF6" stroke-width="7" stroke-linecap="round"/>
   <rect x="66" y="98" width="124" height="79" rx="25" fill="#142D43"/>
-  <rect x="92" y="116" width="14" height="20" rx="7" fill="#E6FFF6"/>
-  <rect x="150" y="116" width="14" height="20" rx="7" fill="#E6FFF6"/>
+  <path d="M92 124H106V128A7 7 0 0 1 92 128Z" fill="#E6FFF6"/>
+  <path d="M150 124H164V128A7 7 0 0 1 150 128Z" fill="#E6FFF6"/>
+  <path d="M91 122H107M149 122H165" stroke="#97EBD5" stroke-width="3" stroke-linecap="round"/>
   <circle cx="85" cy="148" r="6" fill="#FFB8A8"/>
   <circle cx="171" cy="148" r="6" fill="#FFB8A8"/>
-  <path d="M112 148C120 157 136 157 144 148" stroke="#97EBD5" stroke-width="5" stroke-linecap="round"/>
+  <ellipse cx="143" cy="151" rx="8" ry="9" stroke="#97EBD5" stroke-width="4"/>
+  <g transform="rotate(12 144 151)">
+    <rect x="143" y="147" width="55" height="9" rx="4.5" fill="#FFF4DD" stroke="#142D43" stroke-width="3"/>
+    <path d="M147 148.5H158V154.5H147A3 3 0 0 1 147 148.5Z" fill="#E5B578"/>
+    <path d="M190 148.5H193.5A3 3 0 0 1 193.5 154.5H190Z" fill="#FF9B85"/>
+  </g>
+  <path d="M199 158C220 147 230 137 217 124C204 111 214 101 229 88C237 81 236 72 231 66" stroke="#CEE2E5" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+  <path d="M226 113C239 103 246 91 241 82" stroke="#CEE2E5" stroke-width="3.5" stroke-linecap="round" opacity=".4"/>
   <path d="M212 38V54M204 46H220" stroke="#FFD782" stroke-width="5" stroke-linecap="round"/>
 </svg>
