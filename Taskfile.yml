@@ -29,9 +29,10 @@ tasks:
       - go install -trimpath -ldflags "-X github.com/sprisa/sig/cmd.Version=v{{.VERSION}}" .
 
   assets:
-    desc: Render the 1280x640 GitHub social preview (requires librsvg)
+    desc: Render both 1280x640 GitHub social previews (requires librsvg)
     cmds:
       - rsvg-convert --width 1280 --height 640 --output docs/assets/social-preview.png docs/assets/social-preview.svg
+      - rsvg-convert --width 1280 --height 640 --output docs/assets/social-preview-mouth.png docs/assets/social-preview-mouth.svg
 
   build:go:
     desc: Cross-build snapshot binaries with GoReleaser (no publishing)
