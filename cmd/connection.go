@@ -56,7 +56,8 @@ func (a *app) connect(c *cli.Command) (connection, error) {
 	}
 	entry, exists := cfg.Contexts[name]
 	urlOverride, key := a.Getenv("SIGNOZ_URL"), a.Getenv("SIGNOZ_API_KEY")
-	if c.IsSet("context") && !exists && (urlOverride == "" || key == "") {
+	keyCommand := a.Getenv("SIGNOZ_API_KEY_COMMAND")
+	if c.IsSet("context") && !exists && (urlOverride == "" || (key == "" && keyCommand == "")) {
 		return connection{}, fail("config", "context does not exist; run sig auth login --context NAME --url URL")
 	}
 	endpoint := entry.URL
@@ -71,6 +72,12 @@ func (a *app) connect(c *cli.Command) (connection, error) {
 		return connection{}, err
 	}
 	source := "environment"
+	if key == "" && keyCommand != "" {
+		if key, err = commandKey(keyCommand, c.Duration("timeout")); err != nil {
+			return connection{}, err
+		}
+		source = "command"
+	}
 	if key == "" {
 		if endpoint != entry.URL {
 			return connection{}, fail("authentication", "SIGNOZ_URL changes the stored endpoint; supply SIGNOZ_API_KEY too, or log in to that endpoint")

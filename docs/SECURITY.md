@@ -24,6 +24,11 @@ keychain. Environment variables can be inherited by child processes, so treat
 them as secrets. Keys are not accepted through an `--api-key` argument;
 `auth login --key-stdin` supports importing a key through a pipe.
 
+`SIGNOZ_API_KEY_COMMAND` runs a shell command chosen by whoever controls the
+environment, with the user's privileges, on every invocation. Set it only from
+trusted configuration. sig never stores its output and never echoes its output
+or standard error in errors.
+
 `auth logout` removes the local stored key, not the server-side credential.
 It does not unset `SIGNOZ_API_KEY` or `SIGNOZ_CUSTOM_HEADERS`. Revoke or rotate
 server keys in SigNoz when needed.

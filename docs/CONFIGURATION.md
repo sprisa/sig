@@ -66,6 +66,7 @@ Have your secret manager or execution environment supply these variables:
 | --- | --- |
 | `SIGNOZ_URL` | Reachable SigNoz API URL |
 | `SIGNOZ_API_KEY` | Service-account key; overrides the selected context's stored key |
+| `SIGNOZ_API_KEY_COMMAND` | Command that prints a key; sig runs it once per invocation when `SIGNOZ_API_KEY` is unset |
 | `SIGNOZ_CUSTOM_HEADERS` | Optional extra headers for reverse-proxy authentication |
 | `SIG_CONFIG_DIR` | Optional override for the local configuration directory |
 
@@ -80,6 +81,24 @@ sig logs search --since 15m
 With an environment URL and key, querying does not write configuration or access
 the keychain. These are also the URL/key variable names used by the official MCP
 server, but sig connects directly to the SigNoz API, not the MCP endpoint.
+
+### Short-lived credentials
+
+When an access proxy in front of SigNoz accepts a credential that expires, such
+as an identity token, set `SIGNOZ_API_KEY_COMMAND` instead of a fixed key. sig
+runs the command through `/bin/sh -c` (`cmd /C` on Windows) once per invocation,
+before its first request, and sends the trimmed standard output as the key:
+
+```sh
+export SIGNOZ_URL=https://signoz.example.com
+export SIGNOZ_API_KEY_COMMAND='my-token-helper print-token'
+sig logs search --since 15m
+```
+
+The command must exit 0 and print the key alone, at most 64 KiB. sig discards
+its standard error and reports only that it failed, so run the command directly
+to see why. It shares the `--timeout` budget of one request. `sig auth status`
+reports `"credential_source":"command"`; the key is never stored.
 
 ## Multiple contexts
 
@@ -106,6 +125,7 @@ context returns to an unconfigured `default`.
 1. `--context` selects a context instead of the configured current one.
 2. `SIGNOZ_URL` overrides that context's endpoint for the invocation.
 3. `SIGNOZ_API_KEY` overrides its stored key without consulting the keychain.
+   Without it, `SIGNOZ_API_KEY_COMMAND` does the same with the key the command prints.
 4. A changed endpoint requires an environment key too; a stored key is not reused
    for a different URL.
 
